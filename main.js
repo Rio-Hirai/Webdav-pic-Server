@@ -97,7 +97,7 @@ const serverConfigs = [
     MAX_LIST: 128 * 2,
     Photo_Size: 128 * 7,
     defaultQuality: 50,
-    label: "v20.0 (軽量版)",
+    label: "軽量版",
   },
   {
     PORT: 1901,
@@ -105,7 +105,7 @@ const serverConfigs = [
     MAX_LIST: 128 * 8,
     Photo_Size: 128 * 8,
     defaultQuality: 70,
-    label: "v20.1 (バランス版)",
+    label: "バランス版",
   },
   {
     PORT: 1902,
@@ -113,7 +113,7 @@ const serverConfigs = [
     MAX_LIST: 128 * 32,
     Photo_Size: null, // リサイズなし
     defaultQuality: 85,
-    label: "v20.2 (オリジナル版)",
+    label: "オリジナル版",
   },
 ];
 

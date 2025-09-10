@@ -234,8 +234,8 @@ function startWebDAV(config) {
   class CachedFileSystem extends webdav.PhysicalFileSystem {
     constructor(rootPath, dirCache, statCache) {
       super(rootPath);
-      this.dirCache = dirCache;
-      this.statCache = statCache;
+      this.dirCache = dirCache; // ディレクトリキャッシュ
+      this.statCache = statCache; // ファイル統計キャッシュ
     }
 
     _readdir(path, ctx, callback) {

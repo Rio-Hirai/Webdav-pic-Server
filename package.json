@@ -1,10 +1,10 @@
 {
-  "name": "webdav",
-  "version": "20.0.1",
-  "main": "webdav.js",
+  "name": "webdav-pc-server",
+  "version": "20.0.2",
+  "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start-zbooks": "node zbooks_server.js"
+    "start": "node main.js"
   },
   "keywords": [],
   "author": "",

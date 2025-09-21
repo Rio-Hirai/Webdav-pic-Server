@@ -22,7 +22,21 @@ const { LRUCache } = require("lru-cache"); // LRUキャッシュ実装 - メモ�
  * @returns {string} ISO8601形式のタイムスタンプ
  */
 function timestamp() {
-  return new Date().toISOString();
+  // 日本時間 (JST) の ISO 8601 形式で出力する
+  // 例: 2025-09-21T14:03:05
+  const dt = new Date();
+  const formatted = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Tokyo",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(dt);
+  // Intl.DateTimeFormat with 'sv-SE' returns 'YYYY-MM-DD HH:mm:ss'
+  return formatted.replace(" ", "T");
 }
 
 /**
@@ -33,9 +47,9 @@ function timestamp() {
  * - child/flushメソッドは互換性のため空実装
  */
 const logger = {
-  info: (...args) => console.log(`[${timestamp()}] INFO: ${args.join(" ")}`),
-  warn: (...args) => console.log(`[${timestamp()}] WARN: ${args.join(" ")}`),
-  error: (...args) => console.error(`[${timestamp()}] ERROR: ${args.join(" ")}`),
+  info: (...args) => console.log(`[${timestamp()}] INFO: ${args.join(" ")}`), // infoはstdoutに出力
+  warn: (...args) => console.log(`[${timestamp()}] WARN: ${args.join(" ")}`), // warnはstdoutに出力
+  error: (...args) => console.error(`[${timestamp()}] ERROR: ${args.join(" ")}`), // errorはstderrに出力
   child: () => logger, // 子ロガー（互換性のため）
   flush: () => {}, // フラッシュ（互換性のため）
 };
@@ -84,7 +98,7 @@ const pipeline = promisify(stream.pipeline);
 
 /**
  * 画像キャッシュシステム設定
- * 変換済み画像の一時保存による高速化とサーバー負荷軽減を実現
+ * 変換済み画像の一時保存による高速化とサーバー負荷軽減を実現（したはず？ 高スペックCPUだと違いが分からない）
  *
  * 技術的詳細:
  * - ファイルベースキャッシュ: 変換結果をWebPファイルとして保存
@@ -189,16 +203,8 @@ setInterval(() => cleanupCache(CACHE_DIR), CLEANUP_INTERVAL_MS);
  */
 const serverConfigs = [
   {
-    PORT: 1899, // サーバーポート番号
-    ROOT_PATH: "Z:/", // WebDAVのルートディレクトリ
-    MAX_LIST: 128 * 2, // ディレクトリリスト表示の最大件数（256件）
-    Photo_Size: 128 * 2, // 画像リサイズサイズ（256px）
-    defaultQuality: 30, // WebP変換のデフォルト品質（30%）
-    label: "デモ版", // ログ出力用の識別ラベル
-  },
-  {
     PORT: 1900, // サーバーポート番号
-    ROOT_PATH: "Z:/", // WebDAVのルートディレクトリ
+    ROOT_PATH: "Z:/書籍", // WebDAVのルートディレクトリ
     MAX_LIST: 128 * 2, // ディレクトリリスト表示の最大件数（256件）
     Photo_Size: 128 * 7, // 画像リサイズサイズ（896px）
     defaultQuality: 50, // WebP変換のデフォルト品質（50%）
@@ -206,7 +212,7 @@ const serverConfigs = [
   },
   {
     PORT: 1901, // サーバーポート番号
-    ROOT_PATH: "Z:/", // WebDAVのルートディレクトリ
+    ROOT_PATH: "Z:/書籍", // WebDAVのルートディレクトリ
     MAX_LIST: 128 * 8, // ディレクトリリスト表示の最大件数（1024件）
     Photo_Size: 128 * 8, // 画像リサイズサイズ（1024px）
     defaultQuality: 70, // WebP変換のデフォルト品質（70%）
@@ -214,7 +220,7 @@ const serverConfigs = [
   },
   {
     PORT: 1902, // サーバーポート番号
-    ROOT_PATH: "Z:/", // WebDAVのルートディレクトリ
+    ROOT_PATH: "Z:/書籍", // WebDAVのルートディレクトリ
     MAX_LIST: 128 * 32, // ディレクトリリスト表示の最大件数（4096件）
     Photo_Size: null, // リサイズなし（オリジナルサイズ）
     defaultQuality: 85, // WebP変換のデフォルト品質（85%）
@@ -300,30 +306,30 @@ function startWebDAV(config) {
    */
   function readdirSyncWrap(dir, opts) {
     // キャッシュチェック（LRUCacheのTTLが有効なら自動的に期限切れを判定）
-    const cached = dirCache.get(dir);
-    if (cached) return cached.slice(0, MAX_LIST);
+    const cached = dirCache.get(dir); // キャッシュから取得
+    if (cached) return cached.slice(0, MAX_LIST); // キャッシュヒット時はMAX_LIST件まで返す
 
     let names = [];
     try {
       // opendirSyncを使用したストリーミング読み込み（大量ファイル対応）
-      const dirHandle = fs.opendirSync(dir);
+      const dirHandle = fs.opendirSync(dir); // 同期opendir（Dirオブジェクトを返す）
       let entry;
       // MAX_LIST件まで読み込み（メモリ使用量制限）
       while ((entry = dirHandle.readSync()) !== null && names.length < MAX_LIST) {
-        names.push(entry.name);
+        names.push(entry.name); // ファイル名を配列に追加
       }
       dirHandle.closeSync();
     } catch {
       // エラー時は従来のreaddirSyncにフォールバック
-      names = origReaddirSync(dir, opts).slice(0, MAX_LIST);
+      names = origReaddirSync(dir, opts).slice(0, MAX_LIST); // MAX_LIST件まで
     }
 
     // キャッシュ保存（エラーは無視）
     try {
-      dirCache.set(dir, names);
+      dirCache.set(dir, names); // キャッシュに保存
     } catch (e) {}
 
-    return names;
+    return names; // ファイル名配列を返す
   }
   /**
    * statSync（同期）のキャッシュラッパー
@@ -334,23 +340,23 @@ function startWebDAV(config) {
    * @returns {Object} ファイル統計情報オブジェクト
    */
   function statSyncWrap(p, opts) {
-    const cached = statCache.get(p);
-    if (cached) return cached;
+    const cached = statCache.get(p); // キャッシュから取得
+    if (cached) return cached; // キャッシュヒット時はそのまま返す
 
     try {
       const stat = origStatSync(p, opts);
       // キャッシュ保存（エラーは無視）
       try {
-        statCache.set(p, stat);
+        statCache.set(p, stat); // キャッシュに保存
       } catch (e) {}
-      return stat;
+      return stat; // 統計情報を返す
     } catch {
       // ファイルが存在しない場合のデフォルトオブジェクト
       return {
-        isFile: () => false,
-        isDirectory: () => false,
-        mtimeMs: 0,
-        size: 0,
+        isFile: () => false, // 存在しない場合は常にfalseを返す
+        isDirectory: () => false, // 存在しない場合は常にfalseを返す
+        mtimeMs: 0, // 存在しない場合は0を返す
+        size: 0, // 存在しない場合は0を返す
       };
     }
   }
@@ -364,29 +370,29 @@ function startWebDAV(config) {
    * @returns {Promise<string[]>} ディレクトリ内のファイル名配列
    */
   async function readdirPWrap(dir, opts) {
-    const cached = dirCache.get(dir);
-    if (cached) return cached.slice(0, MAX_LIST);
+    const cached = dirCache.get(dir); // キャッシュから取得
+    if (cached) return cached.slice(0, MAX_LIST); // キャッシュヒット時はMAX_LIST件まで返す
 
-    let names = [];
+    let names = []; // ファイル名配列初期化
     try {
       // 非同期opendirを使用したストリーミング読み込み
       const dirHandle = await fs.promises.opendir(dir);
       for await (const entry of dirHandle) {
-        names.push(entry.name);
+        names.push(entry.name); // ファイル名を配列に追加
         if (names.length >= MAX_LIST) break; // MAX_LIST件で制限
       }
-      await dirHandle.close();
+      await dirHandle.close(); // ディレクトリハンドルを閉じる
     } catch {
       // エラー時は従来のreaddirにフォールバック
-      names = await origReaddirP(dir, opts);
+      names = await origReaddirP(dir, opts); // そのまま全件取得
     }
 
     // キャッシュ保存（エラーは無視）
     try {
-      dirCache.set(dir, names);
+      dirCache.set(dir, names); // キャッシュに保存
     } catch (e) {}
 
-    return names;
+    return names; // ファイル名配列を返す
   }
 
   /**
@@ -398,23 +404,23 @@ function startWebDAV(config) {
    * @returns {Promise<Object>} ファイル統計情報オブジェクト
    */
   async function statPWrap(p, opts) {
-    const cached = statCache.get(p);
-    if (cached) return cached;
+    const cached = statCache.get(p); // キャッシュから取得
+    if (cached) return cached; // キャッシュヒット時はそのまま返す
 
     try {
-      const stat = await origStatP(p, opts);
+      const stat = await origStatP(p, opts); // 非同期stat取得
       // キャッシュ保存（エラーは無視）
       try {
-        statCache.set(p, stat);
+        statCache.set(p, stat); // キャッシュに保存
       } catch (e) {}
-      return stat;
+      return stat; // 統計情報を返す
     } catch {
       // ファイルが存在しない場合のデフォルトオブジェクト
       return {
-        isFile: () => false,
-        isDirectory: () => false,
-        mtimeMs: 0,
-        size: 0,
+        isFile: () => false, // 存在しない場合は常にfalseを返す
+        isDirectory: () => false, // 存在しない場合は常にfalseを返す
+        mtimeMs: 0, // 存在しない場合は0を返す
+        size: 0, // 存在しない場合は0を返す
       };
     }
   }
@@ -445,12 +451,12 @@ function startWebDAV(config) {
    */
   server.beforeRequest((ctx, next) => {
     if (ctx.request.method === "PROPFIND") {
-      const depthHeader = ctx.request.headers["depth"];
-      const depth = (Array.isArray(depthHeader) ? depthHeader[0] : depthHeader) || "1";
+      const depthHeader = ctx.request.headers["depth"]; // Depthヘッダー取得
+      const depth = (Array.isArray(depthHeader) ? depthHeader[0] : depthHeader) || "1"; // デフォルトは"1"
 
       if (depth.toLowerCase() === "infinity") {
-        ctx.setCode(403); // 禁止
-        return ctx.response.end("Depth infinity is not supported.");
+        ctx.setCode(403); // 403 Forbiddenを設定
+        return ctx.response.end("Depth infinity is not supported."); // エラーメッセージを返す
       }
     }
     next(); // 次のミドルウェアに処理を委譲
@@ -469,7 +475,7 @@ function startWebDAV(config) {
      * @param {LRUCache} statCache - ファイル統計情報キャッシュ
      */
     constructor(rootPath, dirCache, statCache) {
-      super(rootPath);
+      super(rootPath); // 親クラスのコンストラクタを呼び出し
       this.dirCache = dirCache; // ディレクトリリストキャッシュ
       this.statCache = statCache; // ファイル統計情報キャッシュ
     }
@@ -484,8 +490,8 @@ function startWebDAV(config) {
      */
     _readdir(path, ctx, callback) {
       try {
-        const cached = this.dirCache.get(path);
-        if (cached) return callback(null, cached.slice(0, MAX_LIST));
+        const cached = this.dirCache.get(path); // キャッシュから取得
+        if (cached) return callback(null, cached.slice(0, MAX_LIST)); // キャッシュヒット時はMAX_LIST件まで返す
       } catch (e) {
         // キャッシュエラー時は親クラスの実装にフォールバック
       }
@@ -494,14 +500,14 @@ function startWebDAV(config) {
       super._readdir(path, ctx, (err, names) => {
         if (!err && Array.isArray(names)) {
           try {
-            const limited = names.slice(0, MAX_LIST);
-            this.dirCache.set(path, limited);
-            return callback(null, limited);
+            const limited = names.slice(0, MAX_LIST); // MAX_LIST件までに制限
+            this.dirCache.set(path, limited); // キャッシュに保存
+            return callback(null, limited); // 制限後の配列を返す
           } catch (e) {
             // キャッシュ保存エラーは無視
           }
         }
-        callback(err, names);
+        callback(err, names); // エラーまたはキャッシュ保存失敗時はそのまま返す
       });
     }
 
@@ -515,8 +521,8 @@ function startWebDAV(config) {
      */
     _stat(path, ctx, callback) {
       try {
-        const cached = this.statCache.get(path);
-        if (cached) return callback(null, cached);
+        const cached = this.statCache.get(path); // キャッシュから取得
+        if (cached) return callback(null, cached); // キャッシュヒット時はそのまま返す
       } catch (e) {
         // キャッシュエラー時は親クラスの実装にフォールバック
       }
@@ -525,12 +531,12 @@ function startWebDAV(config) {
       super._stat(path, ctx, (err, stat) => {
         if (!err && stat) {
           try {
-            this.statCache.set(path, stat);
+            this.statCache.set(path, stat); // キャッシュに保存
           } catch (e) {
             // キャッシュ保存エラーは無視
           }
         }
-        callback(err, stat);
+        callback(err, stat); // エラーまたはキャッシュ保存失敗時はそのまま返す
       });
     }
   }
@@ -544,8 +550,8 @@ function startWebDAV(config) {
    */
   server.setFileSystem("/", new CachedFileSystem(ROOT_PATH, dirCache, statCache), (success) => {
     if (!success) {
-      logger.error(`マウント失敗: ${label}`);
-      process.exit(1);
+      logger.error(`マウント失敗: ${label}`); // マウント失敗時はエラーログを出力
+      process.exit(1); // 致命的エラーのためプロセス終了
     }
 
     /**
@@ -559,7 +565,7 @@ function startWebDAV(config) {
       fs.promises.readdir = readdirPWrap; // 非同期ディレクトリ読み込みをキャッシュ化
       fs.promises.stat = statPWrap; // 非同期ファイル統計取得をキャッシュ化
     } catch (e) {
-      logger.warn("[warn] failed to install fs wrappers", e);
+      logger.warn("[warn] failed to install fs wrappers", e); // ラッパーインストール失敗は警告ログを出力
     }
 
     /**
@@ -597,7 +603,7 @@ function startWebDAV(config) {
     const safeResolve = (root, urlPath) => {
       const decoded = decodeURIComponent(urlPath || ""); // URLデコード
       // クエリパラメータを削除して先頭のスラッシュを削除
-      const rel = decoded.split("?")[0].replace(/^\/+/, "");
+      const rel = decoded.split("?")[0].replace(/^\/+/, ""); // 相対パス部分
       const candidate = path.resolve(root, rel); // 相対パスを絶対パスに解決
       const rootResolved = path.resolve(root); // ルートパスを絶対パスに解決
 
@@ -633,7 +639,7 @@ function startWebDAV(config) {
         fullPath = safeResolve(ROOT_PATH, urlPath); // セキュアなパス解決
       } catch (e) {
         res.writeHead(403); // Forbidden
-        return res.end("Access denied");
+        return res.end("Access denied"); // アクセス拒否メッセージ
       }
 
       // PROPFINDリクエストの詳細ログ出力
@@ -644,7 +650,7 @@ function startWebDAV(config) {
         logger.info(`[PROPFIND] [${label}] from=${req.connection.remoteAddress} path=${displayPath} depth=${depth}`);
       }
 
-      logger.info(`[${label}] ${req.connection.remoteAddress} ${req.method} ${displayPath}`);
+      logger.info(`[${label}] ${req.connection.remoteAddress} ${req.method} ${displayPath}`); // 基本ログ出力
 
       /**
        * 画像ファイルのGETリクエスト処理
@@ -652,14 +658,14 @@ function startWebDAV(config) {
        */
       if (req.method === "GET" && IMAGE_EXTS.includes(ext)) {
         return limit(async () => {
-          logger.info(`[変換要求][${label}] ${fullPath}`);
+          logger.info(`[変換要求][${label}] ${fullPath}`); // 変換要求ログを出力
           const st = await statPWrap(fullPath).catch(() => null); // ファイルの情報を取得
 
           // ファイルが存在しない場合（ディレクトリやファイルでない場合）
           if (!st || !st.isFile()) {
-            logger.warn(`[404 Not Found][${label}] ${fullPath}`);
-            res.writeHead(404);
-            return res.end("Not found");
+            logger.warn(`[404 Not Found][${label}] ${fullPath}`); // 警告ログを出力
+            res.writeHead(404); // Not Found
+            return res.end("Not found"); // エラーメッセージを返す
           }
 
           // 画像サイズが1MB以上の場合のみキャッシュ
@@ -672,7 +678,7 @@ function startWebDAV(config) {
           const qParam = req.url.match(/[?&]q=(\d+)/)?.[1]; // クエリからqualityを取得
           const quality = qParam
             ? Math.min(Math.max(parseInt(qParam, 10), 30), 90) // 30から90の範囲でqualityを取得
-            : defaultQuality;
+            : defaultQuality; // デフォルト品質を使用
 
           /**
            * キャッシュキーの生成
@@ -686,10 +692,10 @@ function startWebDAV(config) {
            * - 衝突回避: 複数パラメータの組み合わせによる一意性保証
            */
           const key = crypto
-            .createHash("md5")
-            .update(fullPath + "|" + (Photo_Size ?? "o") + "|" + quality + "|" + String(st.mtimeMs) + "|" + String(st.size))
-            .digest("hex");
-          const cachePath = path.join(CACHE_DIR, key + ".webp");
+            .createHash("md5") // MD5ハッシュアルゴリズムを使用
+            .update(fullPath + "|" + (Photo_Size ?? "o") + "|" + quality + "|" + String(st.mtimeMs) + "|" + String(st.size)) // 複数パラメータを連結
+            .digest("hex"); // キャッシュキーを生成
+          const cachePath = path.join(CACHE_DIR, key + ".webp"); // キャッシュファイルのパス
 
           /**
            * キャッシュファイルの存在確認とレスポンス
@@ -697,22 +703,22 @@ function startWebDAV(config) {
            */
           if (shouldCache) {
             try {
-              const cst = await statPWrap(cachePath).catch(() => null);
+              const cst = await statPWrap(cachePath).catch(() => null); // キャッシュファイルの情報を取得
               if (cst && cst.isFile && cst.isFile()) {
                 // キャッシュファイルが存在する場合、直接レスポンス
                 const headers = {
-                  "Content-Type": "image/webp",
-                  "Content-Length": cst.size,
-                  "Last-Modified": new Date(cst.mtimeMs).toUTCString(),
-                  ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"',
-                  Connection: "Keep-Alive",
-                  "Keep-Alive": "timeout=600",
+                  "Content-Type": "image/webp", // WebP画像のMIMEタイプ
+                  "Content-Length": cst.size, // キャッシュファイルのサイズ
+                  "Last-Modified": new Date(cst.mtimeMs).toUTCString(), // 最終更新日時
+                  ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"', // ETagヘッダー
+                  Connection: "Keep-Alive", // Keep-Alive接続
+                  "Keep-Alive": "timeout=600", // Keep-Aliveタイムアウト
                 };
-                res.writeHead(200, headers);
-                return fs.createReadStream(cachePath).pipe(res);
+                res.writeHead(200, headers); // OK
+                return fs.createReadStream(cachePath).pipe(res); // キャッシュファイルをストリームでレスポンス
               }
             } catch (e) {
-              logger.warn("[cache read error async]", e);
+              logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
             }
           }
 
@@ -721,9 +727,9 @@ function startWebDAV(config) {
            * 最近失敗した変換の即座な再試行を避ける
            */
           if (shouldCache && failedCache.has(key)) {
-            logger.warn(`[backoff][${label}] recent failure for key, skipping retry: ${key}`);
+            logger.warn(`[backoff][${label}] recent failure for key, skipping retry: ${key}`); // 警告ログを出力
             res.writeHead(503); // Service Unavailable
-            return res.end("Temporary conversion failure, try again later");
+            return res.end("Temporary conversion failure, try again later"); // 一時的なエラーメッセージを返す
           }
 
           /**
@@ -733,15 +739,15 @@ function startWebDAV(config) {
           if (shouldCache && inflight.has(key)) {
             try {
               await inflight.get(key); // 進行中の変換完了を待機
-              const cst = await statPWrap(cachePath).catch(() => null);
+              const cst = await statPWrap(cachePath).catch(() => null); // キャッシュファイルの情報を再取得
               if (cst && cst.isFile && cst.isFile()) {
                 // 変換完了後、キャッシュファイルをレスポンス
-                res.writeHead(200, { "Content-Type": "image/webp", "Content-Length": cst.size });
-                return fs.createReadStream(cachePath).pipe(res);
+                res.writeHead(200, { "Content-Type": "image/webp", "Content-Length": cst.size }); // OK
+                return fs.createReadStream(cachePath).pipe(res); // キャッシュファイルをストリームでレスポンス
               }
             } catch (e) {
               // 先行変換が失敗したら落ちて次で再生成（待ちがタイムアウト等で失敗）
-              logger.warn("[inflight wait error async]", e);
+              logger.warn("[inflight wait error async]", e); // 警告ログを出力
             }
           }
 
@@ -750,28 +756,28 @@ function startWebDAV(config) {
            * リトライと失敗バックオフ付きで変換を実行し、オプションで原子的にキャッシュ
            */
           const performConversion = async () => {
-            let attempt = 0;
+            let attempt = 0; // リトライ回数カウンタ
             while (true) {
               try {
-                await convertAndRespond({ fullPath, displayPath, cachePath: shouldCache ? cachePath : null, quality, Photo_Size, label, fs, sharp, execFile, res });
+                await convertAndRespond({ fullPath, displayPath, cachePath: shouldCache ? cachePath : null, quality, Photo_Size, label, fs, sharp, execFile, res }); // 変換とレスポンス送信
                 return; // 成功
               } catch (e) {
-                attempt++;
-                logger.warn(`[inflight convert error][${label}] key=${key} attempt=${attempt} err=${e && e.message ? e.message : e}`);
+                attempt++; // リトライ回数をインクリメント
+                logger.warn(`[inflight convert error][${label}] key=${key} attempt=${attempt} err=${e && e.message ? e.message : e}`); // 警告ログを出力
                 if (attempt > MAX_INFLIGHT_RETRIES) {
                   // 迅速な再試行を避けるために失敗を記録
                   try {
-                    failedCache.set(key, true);
+                    failedCache.set(key, true); // 失敗をキャッシュに記録
                   } catch (ee) {}
-                  throw e;
+                  throw e; // 最大リトライ回数を超えたらエラーをスロー
                 }
                 // リトライ前の短いバックオフ
-                await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+                await new Promise((r) => setTimeout(r, RETRY_DELAY_MS)); // リトライ間隔待機
               }
             }
           };
 
-          const work = performConversion();
+          const work = performConversion(); // 変換処理を開始
 
           /**
            * キャッシュ使用時のin-flight管理
@@ -779,12 +785,12 @@ function startWebDAV(config) {
            */
           if (shouldCache) {
             // 待機者が無限にハングしないようにタイムアウトでラップ
-            const timed = Promise.race([work, new Promise((_, rej) => setTimeout(() => rej(new Error("inflight timeout")), INFLIGHT_TIMEOUT_MS))]);
-            inflight.set(key, timed);
-            timed.then(() => inflight.delete(key)).catch(() => inflight.delete(key));
+            const timed = Promise.race([work, new Promise((_, rej) => setTimeout(() => rej(new Error("inflight timeout")), INFLIGHT_TIMEOUT_MS))]); // タイムアウト付きで待機
+            inflight.set(key, timed); // in-flightマップに登録
+            timed.then(() => inflight.delete(key)).catch(() => inflight.delete(key)); // 完了時にin-flightマップから削除
           }
 
-          return work;
+          return work; // 変換処理のPromiseを返す
         });
       }
 
@@ -793,18 +799,18 @@ function startWebDAV(config) {
        * 画像以外のファイルやディレクトリに対するWebDAV操作を処理
        */
       try {
-        logger.info(`[WebDAV][${label}] ${req.method} ${displayPath}`);
-        res.setHeader("Connection", "Keep-Alive");
-        res.setHeader("Keep-Alive", "timeout=120");
-        res.setHeader("Accept-Ranges", "bytes");
-        res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
-        server.executeRequest(req, res);
+        logger.info(`[WebDAV][${label}] ${req.method} ${displayPath}`); // WebDAVリクエストのログを出力
+        res.setHeader("Connection", "Keep-Alive"); // Keep-Alive接続
+        res.setHeader("Keep-Alive", "timeout=120"); // Keep-Aliveタイムアウト
+        res.setHeader("Accept-Ranges", "bytes"); // バイトレンジリクエストをサポート
+        res.setHeader("Cache-Control", "public, max-age=0, must-revalidate"); // キャッシュ制御ヘッダー
+        server.executeRequest(req, res); // WebDAVサーバーにリクエストを処理させる
       } catch (e) {
-        logger.error("WebDAV error", e);
+        logger.error("WebDAV error", e); // エラーログを出力
         if (!res.headersSent) {
           res.writeHead(500); // Internal Server Error
-          res.end("WebDAV error");
-        } else res.end();
+          res.end("WebDAV error"); // エラーメッセージを返す
+        } else res.end(); // 既にヘッダーが送信されている場合はレスポンスを終了
       }
     });
 
@@ -828,9 +834,9 @@ function startWebDAV(config) {
      */
     httpServer.on("error", (err) => {
       if (err && err.code === "EADDRINUSE") {
-        logger.error(`ポート ${PORT} は既に使用されています。${label} の起動をスキップします。`);
+        logger.error(`ポート ${PORT} は既に使用されています。${label} の起動をスキップします。`); // ポート使用中エラーは特別扱い
       } else {
-        logger.error("HTTP server error", err);
+        logger.error("HTTP server error", err); // その他のエラーはエラーログを出力
       }
     });
 
@@ -839,8 +845,8 @@ function startWebDAV(config) {
      * 指定されたポートでサーバーを起動し、起動完了をログ出力
      */
     httpServer.listen(PORT, () => {
-      logger.info(`✅ WebDAV [${label}] 起動: http://localhost:${PORT}/`);
-      logger.info(`[INFO] キャッシュDir=${CACHE_DIR} / MAX_LIST=${MAX_LIST} / Photo_Size=${Photo_Size ?? "オリジナル"}`);
+      logger.info(`✅ WebDAV [${label}] 起動: http://localhost:${PORT}/`); // 起動完了ログを出力
+      logger.info(`[INFO] キャッシュDir=${CACHE_DIR} / MAX_LIST=${MAX_LIST} / Photo_Size=${Photo_Size ?? "オリジナル"}`); // キャッシュ設定ログを出力
     });
   });
 }
@@ -882,7 +888,7 @@ function startWebDAV(config) {
  */
 async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Photo_Size, label, fs, sharp, execFile, res }) {
   // 軽量版（高速化設定）かどうかを判定
-  const isFast = label.includes("軽量版");
+  const isFast = label.includes("軽量版"); // 軽量版はラベルに"軽量版"を含む
 
   // Promise を返すことで呼び出し側が完了を待てるようにする
   return new Promise(async (resolve, reject) => {
@@ -891,7 +897,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
      * キャッシュファイルの書き込み中に他のプロセスが読み込むことを防ぐ
      */
     const tmpPath = cachePath ? cachePath + `.tmp-${crypto.randomBytes(6).toString("hex")}` : null;
-    let transformer;
+    let transformer; // Sharp変換パイプライン
 
     try {
       /**
@@ -904,10 +910,10 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * - ストリーミング: メモリ効率的な画像処理
        * - エラーハンドリング: 変換失敗時の適切な処理
        */
-      transformer = sharp(fullPath, { limitInputPixels: 1e8 });
+      transformer = sharp(fullPath, { limitInputPixels: 1e8 }); // 100Mピクセル制限
 
       // 回転補正は高速版では行わない（パフォーマンス優先）
-      if (!isFast) transformer = transformer.rotate();
+      if (!isFast) transformer = transformer.rotate(); // EXIFに基づく自動回転
 
       /**
        * リサイズ処理の設定
@@ -923,22 +929,22 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         if (isFast) {
           // 軽量版: 幅を基準に単純リサイズ（処理速度優先）
           transformer = transformer.resize({
-            width: Photo_Size,
+            width: Photo_Size, // 指定幅にリサイズ
             withoutEnlargement: true, // 元画像より大きくしない
           });
         } else {
           // 通常版: 縦横を比較して短辺に合わせる（見た目優先）
-          const meta = await transformer.metadata();
-          if (meta.width != null && meta.height != null) {
-            if (meta.width < meta.height) {
+          const meta = await transformer.metadata(); // メタデータ取得
+          if (meta.width != null && meta.height != null) { // サイズ情報が取得できた場合のみ
+            if (meta.width < meta.height) { // 短辺が幅の場合
               transformer = transformer.resize({
-                width: Photo_Size,
-                withoutEnlargement: true,
+                width: Photo_Size, // 指定幅にリサイズ
+                withoutEnlargement: true, // 元画像より大きくしない
               });
             } else {
-              transformer = transformer.resize({
-                height: Photo_Size,
-                withoutEnlargement: true,
+              transformer = transformer.resize({ // heightを基準にリサイズ
+                height: Photo_Size, // 指定高さにリサイズ
+                withoutEnlargement: true, // 元画像より大きくしない
               });
             }
           }
@@ -962,7 +968,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         smartSubsample: isFast ? false : true, // スマートサブサンプリング
       });
 
-      logger.info(`[変換実行][${label}] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality})`);
+      logger.info(`[変換実行][${label}] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality})`); // 変換実行ログを出力
 
       /**
        * ストリーミング処理の設定
@@ -974,8 +980,8 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * - 並列処理: キャッシュ書き込みとレスポンス送信の同時実行
        * - エラー伝播: ストリーム間のエラー状態の適切な伝播
        */
-      const pass = new PassThrough();
-      transformer.pipe(pass);
+      const pass = new PassThrough(); // PassThroughストリーム
+      transformer.pipe(pass); // Sharpの出力をPassThroughにパイプ
 
       let wroteHeader = false; // HTTPヘッダー送信フラグ
 
@@ -986,10 +992,10 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * @param {Error} err - Sharp処理で発生したエラー
        */
       const onErrorFallback = (err) => {
-        logger.warn(`[Sharp失敗→ImageMagick][${label}] ${displayPath} : ${err && err.message ? err.message : err}`);
+        logger.warn(`[Sharp失敗→ImageMagick][${label}] ${displayPath} : ${err && err.message ? err.message : err}`); // 警告ログを出力
 
         // 一時ファイルの掃除（あれば）
-        if (tmpPath) fs.unlink(tmpPath, () => {});
+        if (tmpPath) fs.unlink(tmpPath, () => {}); // 存在しない場合は無視
 
         /**
          * ImageMagickコマンドライン引数の構築
@@ -1003,25 +1009,25 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
          * - エラーハンドリング: プロセス失敗時の適切な処理
          * - リソース管理: プロセス終了時の自動クリーンアップ
          */
-        const resizeOpt = Photo_Size ? ["-resize", `${Photo_Size}x${Photo_Size}`] : [];
-        const magick = spawn(MAGICK_CMD, [fullPath, ...resizeOpt, "-quality", `${quality}`, "webp:-"]);
+        const resizeOpt = Photo_Size ? ["-resize", `${Photo_Size}x${Photo_Size}`] : []; // リサイズオプション
+        const magick = spawn(MAGICK_CMD, [fullPath, ...resizeOpt, "-quality", `${quality}`, "webp:-"]); // ImageMagickプロセスを起動
 
         // ImageMagickプロセスのエラーハンドリング
         magick.on("error", (err) => {
-          logger.error(`[ImageMagick変換失敗][${label}] ${fullPath}: ${err}`);
+          logger.error(`[ImageMagick変換失敗][${label}] ${fullPath}: ${err}`); // エラーログを出力
           if (!res.headersSent) res.writeHead(415); // サポートされていないメディアタイプ
-          res.end("Unsupported image format (sharp+magick error)");
-          return reject(err);
+          res.end("Unsupported image format (sharp+magick error)"); // エラーメッセージを返す
+          return reject(err); // 呼び出し元にエラーを伝播
         });
 
         // HTTPヘッダー設定（まだ送信されていない場合）
         if (!res.headersSent) {
-          res.setHeader("Content-Type", "image/webp");
+          res.setHeader("Content-Type", "image/webp"); // WebP画像のMIMEタイプ
         }
 
         if (tmpPath) {
           // キャッシュファイルへの書き込み処理
-          const writeStream = fs.createWriteStream(tmpPath);
+          const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルへの書き込みストリーム
 
           // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
           pipeline(magick.stdout, writeStream).catch((e) => logger.error("[magick->tmp pipeline error]", e));
@@ -1030,27 +1036,27 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
           // 書き込み完了時に原子的にリネーム
           writeStream.on("finish", () => {
             try {
-              fs.renameSync(tmpPath, cachePath);
+              fs.renameSync(tmpPath, cachePath); // 原子的にリネーム
             } catch (e) {
               // リネーム失敗は無視（競合状態の可能性）
             }
           });
         } else {
           // キャッシュなしの場合は直接レスポンスにストリーミング
-          pipeline(magick.stdout, res).catch((e) => logger.error("[magick->res pipeline error]", e));
+          pipeline(magick.stdout, res).catch((e) => logger.error("[magick->res pipeline error]", e)); // レスポンスはパイプラインで自動終了
         }
 
         // 変換完了時の処理
         magick.stdout.on("end", () => {
-          logger.info(`[変換完了(fallback)][${label}] ${displayPath}`);
-          res.end();
-          return resolve();
+          logger.info(`[変換完了(fallback)][${label}] ${displayPath}`); // 変換完了ログを出力
+          res.end(); // レスポンスを終了
+          return resolve(); // 呼び出し元に完了を伝播
         });
       };
 
       // エラーハンドリングの設定
-      transformer.on("error", onErrorFallback);
-      pass.on("error", onErrorFallback);
+      transformer.on("error", onErrorFallback); // Sharp変換エラー時にフォールバック
+      pass.on("error", onErrorFallback); // PassThroughエラー時にフォールバック
 
       /**
        * キャッシュ処理の分岐
@@ -1063,7 +1069,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * - ストリーミング: データ受信と同時のキャッシュ書き込み
        */
       if (tmpPath) {
-        const writeStream = fs.createWriteStream(tmpPath);
+        const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルへの書き込みストリーム
         let wroteAny = false; // データ書き込みフラグ
 
         // データ受信時の処理
@@ -1071,44 +1077,44 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
           if (!wroteHeader) {
             // 最初のチャンク受信時にHTTPヘッダー送信（チャンク転送）
             res.writeHead(200, {
-              "Content-Type": "image/webp",
-              Connection: "Keep-Alive",
-              "Keep-Alive": "timeout=600",
+              "Content-Type": "image/webp", // WebP画像のMIMEタイプ
+              Connection: "Keep-Alive", // Keep-Alive接続
+              "Keep-Alive": "timeout=600", // Keep-Aliveタイムアウト
             });
-            wroteHeader = true;
+            wroteHeader = true; // ヘッダー送信フラグを設定
           }
-          wroteAny = true;
+          wroteAny = true; // データが書き込まれたことを記録
         });
 
         // ストリーミング処理の設定（エラーハンドリング付き）
-        pipeline(pass, writeStream).catch((e) => logger.error("[cache write pipeline error]", e));
-        pipeline(pass, res).catch((e) => logger.error("[response pipeline error]", e));
+        pipeline(pass, writeStream).catch((e) => logger.error("[cache write pipeline error]", e)); // キャッシュ書き込み
+        pipeline(pass, res).catch((e) => logger.error("[response pipeline error]", e)); // レスポンス送信
 
         // ストリーム終了時の処理
         pass.on("end", async () => {
           // 原子的キャッシュ更新処理
           if (wroteAny) {
             try {
-              await fs.promises.rename(tmpPath, cachePath).catch(async (e) => {
-                logger.warn("[cache rename error async]", e);
+              await fs.promises.rename(tmpPath, cachePath).catch(async (e) => { // 一時ファイルをキャッシュファイルにリネーム
+                logger.warn("[cache rename error async]", e); // リネーム失敗は警告ログを出力
                 // リネーム失敗時は一時ファイルを削除
                 try {
-                  await fs.promises.unlink(tmpPath).catch(() => {});
+                  await fs.promises.unlink(tmpPath).catch(() => {}); // 存在しない場合は無視
                 } catch (_) {}
               });
             } catch (e) {
-              logger.warn("[cache rename outer error]", e);
+              logger.warn("[cache rename outer error]", e); // リネーム失敗は警告ログを出力
             }
           } else {
             // データが書き込まれていない場合は一時ファイルを削除
             try {
-              await fs.promises.unlink(tmpPath).catch(() => {});
+              await fs.promises.unlink(tmpPath).catch(() => {}); // 存在しない場合は無視
             } catch (_) {}
           }
 
-          logger.info(`[変換完了][${label}] ${displayPath}`);
-          res.end();
-          return resolve();
+          logger.info(`[変換完了][${label}] ${displayPath}`); // 変換完了ログを出力
+          res.end(); // レスポンスを終了
+          return resolve(); // 呼び出し元に完了を伝播
         });
       } else {
         /**
@@ -1116,22 +1122,24 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
          * 直接レスポンスにストリーミング
          */
         pass.once("data", () => {
-          if (!wroteHeader) {
-            res.writeHead(200, {
-              "Content-Type": "image/webp",
-              Connection: "Keep-Alive",
-              "Keep-Alive": "timeout=600",
+          if (!wroteHeader) { // 最初のチャンク受信時にHTTPヘッダー送信（チャンク転送）
+            res.writeHead(200, { // レスポンスヘッダーを設定
+              "Content-Type": "image/webp", // WebP画像のMIMEタイプ
+              Connection: "Keep-Alive", // Keep-Alive接続
+              "Keep-Alive": "timeout=600", // Keep-Aliveタイムアウト
             });
-            wroteHeader = true;
+            wroteHeader = true; // ヘッダー送信フラグを設定
           }
         });
 
-        pipeline(pass, res).catch((e) => logger.error("[response pipeline error]", e));
+        pipeline(pass, res).catch((e) => logger.error("[response pipeline error]", e)); // レスポンス送信
+
+        // ストリーム終了時の処理
 
         pass.on("end", () => {
-          logger.info(`[変換完了][${label}] ${fullPath}`);
-          res.end();
-          return resolve();
+          logger.info(`[変換完了][${label}] ${fullPath}`); // 変換完了ログを出力
+          res.end(); // レスポンスを終了
+          return resolve(); // 呼び出し元に完了を伝播
         });
       }
     } catch (e) {
@@ -1139,52 +1147,54 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * Sharp初期化エラー時のフォールバック処理
        * Sharpライブラリの初期化やパイプライン構築で例外が発生した場合の処理
        */
-      logger.warn("[sharp init error]", e);
+      logger.warn("[sharp init error]", e); // 警告ログを出力
 
       // 一時ファイルの掃除（あれば）
       if (tmpPath) {
         try {
-          fs.promises.unlink(tmpPath).catch(() => {});
+          fs.promises.unlink(tmpPath).catch(() => {}); // 存在しない場合は無視
         } catch (e) {}
       }
 
       // ImageMagickによるフォールバック処理
-      const resizeOpt = Photo_Size ? ["-resize", `${Photo_Size}x${Photo_Size}`] : [];
-      const magick = spawn(MAGICK_CMD, [fullPath, ...resizeOpt, "-quality", `${quality}`, "webp:-"]);
+      const resizeOpt = Photo_Size ? ["-resize", `${Photo_Size}x${Photo_Size}`] : []; // リサイズオプション
+      const magick = spawn(MAGICK_CMD, [fullPath, ...resizeOpt, "-quality", `${quality}`, "webp:-"]); // ImageMagickプロセスを起動
 
       // ImageMagickプロセスのエラーハンドリング
       magick.on("error", (err) => {
-        logger.error(`[ImageMagick変換失敗][${label}] ${displayPath}: ${err}`);
+        logger.error(`[ImageMagick変換失敗][${label}] ${displayPath}: ${err}`); // エラーログを出力
         if (!res.headersSent) res.writeHead(415); // サポートされていないメディアタイプ
-        res.end("Unsupported image format (sharp+magick error)");
-        return reject(err);
+        res.end("Unsupported image format (sharp+magick error)"); // エラーメッセージを返す
+        return reject(err); // 呼び出し元にエラーを伝播
       });
 
       // HTTPヘッダー設定
-      if (!res.headersSent) res.setHeader("Content-Type", "image/webp");
+      if (!res.headersSent) res.setHeader("Content-Type", "image/webp"); // ヘッダー送信
 
       if (tmpPath) {
         // キャッシュファイルへの書き込み処理
-        const writeStream = fs.createWriteStream(tmpPath);
-        pipeline(magick.stdout, writeStream).catch((e) => logger.error("[magick->tmp pipeline error]", e));
-        magick.stdout.pipe(res, { end: false });
+        const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルに書き込み
 
-        // 書き込み完了時の原子的リネーム
+        // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
+        pipeline(magick.stdout, writeStream).catch((e) => logger.error("[magick->tmp pipeline error]", e)); // キャッシュ書き込み
+        magick.stdout.pipe(res, { end: false }); // レスポンスは手動で終了
+
+        // 書き込み完了時の原子的リネーム処理
         writeStream.on("finish", async () => {
           try {
-            await fs.promises.rename(tmpPath, cachePath).catch(() => {});
+            await fs.promises.rename(tmpPath, cachePath).catch(() => {}); // リネーム失敗は無視（競合状態の可能性）
           } catch (e) {}
         });
       } else {
         // キャッシュなしの場合は直接レスポンスにストリーミング
-        pipeline(magick.stdout, res).catch((e) => logger.error("[magick->res pipeline error]", e));
+        pipeline(magick.stdout, res).catch((e) => logger.error("[magick->res pipeline error]", e)); // レスポンスはパイプラインで自動終了
       }
 
       // 変換完了時の処理
       magick.stdout.on("end", () => {
-        logger.info(`[変換完了(fallback)][${label}] ${displayPath}`);
-        res.end();
-        return resolve();
+        logger.info(`[変換完了(fallback)][${label}] ${displayPath}`); // 変換完了ログを出力
+        res.end(); // レスポンス終了
+        return resolve(); // 成功
       });
     }
   });

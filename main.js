@@ -58,6 +58,139 @@ const logger = {
 // 環境変数MAGICK_PATHが設定されていればそれを使用、未設定の場合は"magick"をデフォルトとする
 const MAGICK_CMD = process.env.MAGICK_PATH || "magick";
 
+// 設定ファイル監視と動的設定更新機能
+const CONFIG_FILE = "./config.txt";
+const CONFIG_WATCH_INTERVAL = 10000; // 10秒間隔で設定ファイルを監視（より迅速な変更検出）
+
+// 前回の設定値を保存するオブジェクト
+let lastConfigValues = {};
+
+/**
+ * 動的設定読み込み関数
+ * config.txtから設定を読み込み、環境変数を動的に更新
+ */
+function getDynamicConfig(key, defaultValue) {
+  const value = process.env[key];
+  if (value === undefined) return defaultValue;
+  
+  // 数値型の設定を適切に変換
+  if (key.includes('SIZE') || key.includes('LIST') || key.includes('MS') || key.includes('QUALITY')) {
+    return parseInt(value) || defaultValue;
+  }
+  
+  // 真偽値型の設定を適切に変換
+  if (key.includes('ENABLED')) {
+    return value === 'true';
+  }
+  
+  // 浮動小数点型の設定を適切に変換
+  if (key.includes('THRESHOLD')) {
+    return parseFloat(value) || defaultValue;
+  }
+  
+  return value;
+}
+
+/**
+ * 設定ファイル読み込み関数
+ * config.txtから設定を読み込み、環境変数を動的に更新（差分のみログ出力）
+ */
+function loadConfig() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const configContent = fs.readFileSync(CONFIG_FILE, 'utf8');
+      const lines = configContent.split('\n');
+      let updatedCount = 0;
+      const currentConfigValues = {};
+      
+      // 現在の設定値を読み込み
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          const [key, value] = trimmed.split('=');
+          if (key && value !== undefined) {
+            const keyTrimmed = key.trim();
+            const valueTrimmed = value.trim();
+            currentConfigValues[keyTrimmed] = valueTrimmed;
+          }
+        }
+      }
+      
+      // 前回の設定値と比較して差分を検出
+      for (const [key, value] of Object.entries(currentConfigValues)) {
+            // 値が変更された場合のみ更新
+            if (lastConfigValues[key] !== value) {
+              process.env[key] = value;
+              if (lastConfigValues[key] !== undefined) {
+                // 既存設定の変更
+                logger.info(`[設定変更] ${key}: ${lastConfigValues[key]} → ${value}`);
+                
+            // 重要な設定変更の場合は追加情報を出力
+            if (key === 'DEFAULT_QUALITY') {
+              logger.info(`[品質設定更新] 画像変換のデフォルト品質が ${value}% に変更されました`);
+            } else if (key === 'COMPRESSION_THRESHOLD') {
+              logger.info(`[圧縮設定更新] 圧縮閾値が ${(parseFloat(value) * 100).toFixed(1)}% に変更されました`);
+            } else if (key === 'COMPRESSION_ENABLED') {
+              logger.info(`[圧縮設定更新] 圧縮機能が ${value === 'true' ? '有効' : '無効'} に変更されました`);
+            } else if (key === 'PHOTO_SIZE') {
+              logger.info(`[画像サイズ設定更新] 画像リサイズサイズが ${value}px に変更されました`);
+            } else if (key === 'MAX_LIST') {
+              logger.info(`[リスト設定更新] 最大リスト数が ${value}件 に変更されました`);
+            } else if (key === 'CACHE_TTL_MS') {
+              logger.info(`[キャッシュ設定更新] キャッシュ有効期間が ${Math.floor(parseInt(value) / 1000)}秒 に変更されました`);
+            } else if (key === 'CACHE_MIN_SIZE') {
+              logger.info(`[キャッシュ設定更新] キャッシュ最小サイズが ${Math.floor(parseInt(value) / 1024)}KB に変更されました`);
+            }
+              } else {
+                // 新規設定の追加
+                logger.info(`[設定追加] ${key}=${value}`);
+              }
+              updatedCount++;
+            }
+      }
+      
+      // 削除された設定を検出
+      for (const [key, value] of Object.entries(lastConfigValues)) {
+        if (currentConfigValues[key] === undefined) {
+          logger.info(`[設定削除] ${key}=${value}`);
+          updatedCount++;
+        }
+      }
+      
+      // 前回の設定値を更新
+      lastConfigValues = { ...currentConfigValues };
+      
+      // 変更があった場合のみサマリーログを出力
+      if (updatedCount > 0) {
+        logger.info(`[設定監視] ${updatedCount}個の設定を更新しました`);
+      }
+    } else {
+      // ファイルが見つからない場合のみ警告（初回以外は抑制）
+      if (Object.keys(lastConfigValues).length > 0) {
+        logger.warn(`[設定監視] 設定ファイルが見つかりません: ${CONFIG_FILE}`);
+      }
+    }
+  } catch (error) {
+    logger.warn(`[設定読み込みエラー] ${error.message}`);
+  }
+}
+
+// 初期設定読み込み
+loadConfig();
+
+// 設定ファイル監視開始
+setInterval(loadConfig, CONFIG_WATCH_INTERVAL);
+logger.info(`[設定監視開始] ${CONFIG_FILE} を ${CONFIG_WATCH_INTERVAL/1000}秒間隔で監視中`);
+
+// 圧縮機能の有効/無効制御（動的設定対応）
+function getCompressionEnabled() {
+  return process.env.COMPRESSION_ENABLED !== "false";
+}
+
+function getCompressionThreshold() {
+  return parseFloat(process.env.COMPRESSION_THRESHOLD) || 0.3;
+}
+
 /**
  * Sharpライブラリのパフォーマンス最適化設定
  * - concurrency: 並列処理数をCPU数-1に設定（メインスレッドを残す）
@@ -74,9 +207,9 @@ try {
   const cpuCount = Math.max(1, os.cpus().length - 1); // 最低1、最大はCPU数-1
   sharp.concurrency(cpuCount); // 並列処理数の制限
   sharp.cache({
-    memory: 200, // メモリキャッシュサイズ（MB）
-    files: 100, // ファイルキャッシュ数
-    items: 200, // アイテムキャッシュ数
+    memory: 1024, // メモリキャッシュサイズ（MB）- 64GB環境向けに大幅増量
+    files: 500, // ファイルキャッシュ数 - 高性能環境向けに増量
+    items: 1000, // アイテムキャッシュ数 - 高性能環境向けに増量
   });
   logger.info(`sharp configured: concurrency=${cpuCount}`);
 } catch (e) {
@@ -107,9 +240,11 @@ const pipeline = promisify(stream.pipeline);
  * - サイズフィルタ: 小ファイルはキャッシュ対象外（オーバーヘッド回避）
  */
 const CACHE_DIR = "Y:/caches/webdav/tmp"; // キャッシュファイル保存ディレクトリ
-const CACHE_MIN_SIZE = 1 * 1024 * 1024; // 1MB - キャッシュ対象の最小ファイルサイズ
 const CLEANUP_INTERVAL_MS = 30 * 60 * 1000; // 30分 - キャッシュクリーニング実行間隔
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5分 - キャッシュファイルの有効期間
+
+// 動的キャッシュ設定読み込み関数
+const getCacheMinSize = () => getDynamicConfig('CACHE_MIN_SIZE', 1 * 1024 * 1024); // 1MB - キャッシュ対象の最小ファイルサイズ
+const getCacheTTL = () => getDynamicConfig('CACHE_TTL_MS', 5 * 60 * 1000); // 5分 - キャッシュファイルの有効期間
 
 /**
  * キャッシュディレクトリの完全リセット関数（同期版）
@@ -186,7 +321,7 @@ async function cleanupCache(dir) {
     } else if (ent.isFile() && full.endsWith(".webp")) {
       // .webpファイルのTTLチェック
       const stat = await fs.promises.stat(full).catch(() => null);
-      if (stat && Date.now() - stat.mtimeMs > CACHE_TTL_MS) {
+      if (stat && Date.now() - stat.mtimeMs > getCacheTTL()) {
         await fs.promises.unlink(full).catch(() => {}); // 削除失敗は無視
       }
     }
@@ -252,18 +387,10 @@ if (RESTART_ENABLED) {
  */
 const serverConfigs = [
   {
-    PORT: 1899, // サーバーポート番号
-    ROOT_PATH: "Z:/書籍", // WebDAVのルートディレクトリ
-    MAX_LIST: 128 * 7, // ディレクトリリスト表示の最大件数（896件）
-    Photo_Size: 128 * 5, // 画像リサイズサイズ（640px）
-    defaultQuality: 40, // WebP変換のデフォルト品質（40%）
-    label: "軽量版", // ログ出力用の識別ラベル
-  },
-  {
     PORT: 1900, // サーバーポート番号
     ROOT_PATH: "Z:/書籍", // WebDAVのルートディレクトリ
     MAX_LIST: 128 * 7, // ディレクトリリスト表示の最大件数（896件）
-    Photo_Size: 128 * 77, // 画像リサイズサイズ（640px）
+    Photo_Size: 128 * 7, // 画像リサイズサイズ（896px）
     defaultQuality: 50, // WebP変換のデフォルト品質（50%）
     label: "軽量版", // ログ出力用の識別ラベル
   },
@@ -304,8 +431,13 @@ serverConfigs.forEach((config) => startWebDAV(config));
  * @param {string} config.label - ログ識別ラベル
  */
 function startWebDAV(config) {
-  // 設定の分割代入
-  const { PORT, ROOT_PATH, MAX_LIST, Photo_Size, defaultQuality, label } = config;
+  // 設定の分割代入（動的設定読み込み対応）
+  const { PORT, ROOT_PATH, label } = config;
+  
+  // 動的設定読み込み関数
+  const getPhotoSize = () => getDynamicConfig('PHOTO_SIZE', config.Photo_Size);
+  const getMaxList = () => getDynamicConfig('MAX_LIST', config.MAX_LIST);
+  const getDefaultQuality = () => getDynamicConfig('DEFAULT_QUALITY', config.defaultQuality);
 
   // 画像変換対象の拡張子リスト
   const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".avif"];
@@ -325,18 +457,19 @@ function startWebDAV(config) {
    * - 分離設計: ディレクトリリストとファイル統計を独立管理
    */
   const dirCache = new LRUCache({
-    max: 50000, // 最大50,000エントリ（ディレクトリリスト）
+    max: 200000, // 最大200,000エントリ（ディレクトリリスト）- 高性能環境向けに増量
     ttl: DIR_TTL, // TTL: 1時間
   });
 
   const statCache = new LRUCache({
-    max: 200000, // 最大200,000エントリ（ファイル統計情報）
+    max: 1000000, // 最大1,000,000エントリ（ファイル統計情報）- 高性能環境向けに大幅増量
     ttl: STAT_TTL, // TTL: 1時間
   });
 
-  // 並列処理制限: CPU数分の同時実行を許可
-  // pLimitにより、同時実行数を制限してメモリ枯渇とCPU過負荷を防止
-  const limit = pLimit(os.cpus().length);
+  // 並列処理制限: 高性能環境（Ryzen 3950X + 64GB）向けに最適化
+  // CPU数より多い並列処理を許可して高性能環境のリソースを最大活用
+  const cpuCount = os.cpus().length; // 32スレッド（3950X）
+  const limit = pLimit(Math.max(cpuCount * 2, 32)); // 64並列まで許可（高性能環境向け）
 
   /**
    * ファイルシステム関数のキャッシュラッパー作成
@@ -372,13 +505,13 @@ function startWebDAV(config) {
       const dirHandle = fs.opendirSync(dir); // 同期opendir（Dirオブジェクトを返す）
       let entry;
       // MAX_LIST件まで読み込み（メモリ使用量制限）
-      while ((entry = dirHandle.readSync()) !== null && names.length < MAX_LIST) {
+      while ((entry = dirHandle.readSync()) !== null && names.length < getMaxList()) {
         names.push(entry.name); // ファイル名を配列に追加
       }
       dirHandle.closeSync();
     } catch {
       // エラー時は従来のreaddirSyncにフォールバック
-      names = origReaddirSync(dir, opts).slice(0, MAX_LIST); // MAX_LIST件まで
+      names = origReaddirSync(dir, opts).slice(0, getMaxList()); // MAX_LIST件まで
     }
 
     // キャッシュ保存（エラーは無視）
@@ -519,6 +652,7 @@ function startWebDAV(config) {
     next(); // 次のミドルウェアに処理を委譲
   });
 
+
   /**
    * キャッシュ機能付きWebDAVファイルシステムクラス
    * webdav-serverのPhysicalFileSystemを拡張し、ディレクトリリストとファイル統計情報をキャッシュ化
@@ -548,7 +682,7 @@ function startWebDAV(config) {
     _readdir(path, ctx, callback) {
       try {
         const cached = this.dirCache.get(path); // キャッシュから取得
-        if (cached) return callback(null, cached.slice(0, MAX_LIST)); // キャッシュヒット時はMAX_LIST件まで返す
+        if (cached) return callback(null, cached.slice(0, getMaxList())); // キャッシュヒット時はMAX_LIST件まで返す
       } catch (e) {
         // キャッシュエラー時は親クラスの実装にフォールバック
       }
@@ -557,7 +691,7 @@ function startWebDAV(config) {
       super._readdir(path, ctx, (err, names) => {
         if (!err && Array.isArray(names)) {
           try {
-            const limited = names.slice(0, MAX_LIST); // MAX_LIST件までに制限
+            const limited = names.slice(0, getMaxList()); // MAX_LIST件までに制限
             this.dirCache.set(path, limited); // キャッシュに保存
             return callback(null, limited); // 制限後の配列を返す
           } catch (e) {
@@ -676,6 +810,27 @@ function startWebDAV(config) {
     };
 
     /**
+     * Content-Type判定関数
+     * ファイル拡張子に基づいて適切なMIMEタイプを返す
+     *
+     * @param {string} ext - ファイル拡張子
+     * @returns {string} MIMEタイプ
+     */
+    const getContentType = (ext) => {
+      const contentTypes = {
+        '.html': 'text/html; charset=utf-8',
+        '.htm': 'text/html; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.xml': 'application/xml; charset=utf-8',
+        '.txt': 'text/plain; charset=utf-8',
+        '.md': 'text/markdown; charset=utf-8'
+      };
+      return contentTypes[ext.toLowerCase()] || 'application/octet-stream';
+    };
+
+    /**
      * HTTPサーバーの作成
      * 画像変換機能付きのHTTPサーバーを起動し、WebDAVリクエストと画像変換リクエストを処理
      *
@@ -685,7 +840,7 @@ function startWebDAV(config) {
      * - ストリーミング: 大容量ファイルの効率的な転送
      * - エラーハンドリング: 各処理段階での適切なエラー応答
      */
-    const httpServer = http.createServer((req, res) => {
+    const httpServer = http.createServer(async (req, res) => {
       const urlPath = req.url.split("?")[0]; // クエリパラメータを削除
       // v20 と同様に decodeURIComponent を使って表示用パスを作成
       const displayPath = decodeURIComponent(urlPath); // URLデコード
@@ -726,16 +881,17 @@ function startWebDAV(config) {
           }
 
           // 画像サイズが1MB以上の場合のみキャッシュ
-          const shouldCache = st.size >= CACHE_MIN_SIZE; // キャッシュを使用するかどうか
+          const shouldCache = st.size >= getCacheMinSize(); // キャッシュを使用するかどうか
 
           /**
            * 品質パラメータの取得と検証
            * クエリパラメータから品質を取得し、30-90の範囲に制限
+           * 設定ファイルから動的にデフォルト品質を取得
            */
-          const qParam = req.url.match(/[?&]q=(\d+)/)?.[1]; // クエリからqualityを取得
-          const quality = qParam
-            ? Math.min(Math.max(parseInt(qParam, 10), 30), 90) // 30から90の範囲でqualityを取得
-            : defaultQuality; // デフォルト品質を使用
+            const qParam = req.url.match(/[?&]q=(\d+)/)?.[1]; // クエリからqualityを取得
+            const quality = qParam
+              ? Math.min(Math.max(parseInt(qParam, 10), 30), 90) // 30から90の範囲でqualityを取得
+              : getDefaultQuality(); // 動的なデフォルト品質を使用
 
           /**
            * キャッシュキーの生成
@@ -750,7 +906,7 @@ function startWebDAV(config) {
            */
           const key = crypto
             .createHash("md5") // MD5ハッシュアルゴリズムを使用
-            .update(fullPath + "|" + (Photo_Size ?? "o") + "|" + quality + "|" + String(st.mtimeMs) + "|" + String(st.size)) // 複数パラメータを連結
+            .update(fullPath + "|" + (getPhotoSize() ?? "o") + "|" + quality + "|" + String(st.mtimeMs) + "|" + String(st.size)) // 複数パラメータを連結
             .digest("hex"); // キャッシュキーを生成
           const cachePath = path.join(CACHE_DIR, key + ".webp"); // キャッシュファイルのパス
 
@@ -816,7 +972,7 @@ function startWebDAV(config) {
             let attempt = 0; // リトライ回数カウンタ
             while (true) {
               try {
-                await convertAndRespond({ fullPath, displayPath, cachePath: shouldCache ? cachePath : null, quality, Photo_Size, label, fs, sharp, execFile, res }); // 変換とレスポンス送信
+                await convertAndRespond({ fullPath, displayPath, cachePath: shouldCache ? cachePath : null, quality, Photo_Size: getPhotoSize(), label, fs, sharp, execFile, res }); // 変換とレスポンス送信
                 return; // 成功
               } catch (e) {
                 attempt++; // リトライ回数をインクリメント
@@ -857,17 +1013,181 @@ function startWebDAV(config) {
        */
       try {
         logger.info(`[WebDAV][${label}] ${req.method} ${displayPath}`); // WebDAVリクエストのログを出力
-        res.setHeader("Connection", "Keep-Alive"); // Keep-Alive接続
-        res.setHeader("Keep-Alive", "timeout=120"); // Keep-Aliveタイムアウト
-        res.setHeader("Accept-Ranges", "bytes"); // バイトレンジリクエストをサポート
-        res.setHeader("Cache-Control", "public, max-age=0, must-revalidate"); // キャッシュ制御ヘッダー
+        
+        // レスポンスオブジェクトの型チェック（WebDAVサーバーとの互換性確保）
+        if (typeof res.setHeader === 'function') {
+          res.setHeader("Connection", "Keep-Alive"); // Keep-Alive接続
+          res.setHeader("Keep-Alive", "timeout=120"); // Keep-Aliveタイムアウト
+          res.setHeader("Accept-Ranges", "bytes"); // バイトレンジリクエストをサポート
+          res.setHeader("Cache-Control", "public, max-age=0, must-revalidate"); // キャッシュ制御ヘッダー
+        }
+        
+        // WebDAVレスポンスの圧縮処理
+        if (getCompressionEnabled() && typeof res.setHeader === 'function') {
+          const acceptEncoding = req.headers['accept-encoding'] || '';
+          const supportsGzip = acceptEncoding.includes('gzip');
+          
+          if (supportsGzip) {
+            // レスポンスのラッパーを作成して圧縮処理を追加
+            const originalWriteHead = res.writeHead;
+            const originalWrite = res.write;
+            const originalEnd = res.end;
+            
+            let responseData = [];
+            let headersWritten = false;
+            
+            res.writeHead = function(statusCode, statusMessage, headers) {
+              if (typeof statusCode === 'object') {
+                headers = statusCode;
+                statusCode = 200;
+              }
+              headers = headers || {};
+              
+              // Content-Typeを確認
+              const contentType = headers['content-type'] || res.getHeader('content-type') || '';
+              const isTextResponse = contentType.includes('xml') || 
+                                    contentType.includes('html') || 
+                                    contentType.includes('json') || 
+                                    contentType.includes('text');
+              
+              if (isTextResponse) {
+                // テキストレスポンスの場合は圧縮準備
+                headers['Vary'] = 'Accept-Encoding';
+              }
+              
+              headersWritten = true;
+              return originalWriteHead.call(this, statusCode, statusMessage, headers);
+            };
+            
+            res.write = function(chunk, encoding) {
+              if (chunk) {
+                responseData.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
+              }
+              return true;
+            };
+            
+            res.end = function(chunk, encoding) {
+              // 既にレスポンスが終了している場合は何もしない
+              if (res.headersSent && res.finished) {
+                return;
+              }
+              
+              if (chunk) {
+                responseData.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
+              }
+              
+              if (responseData.length === 0) {
+                return originalEnd.call(this);
+              }
+              
+              const fullData = Buffer.concat(responseData);
+              const contentType = res.getHeader('content-type') || '';
+              const isTextResponse = contentType.includes('xml') || 
+                                    contentType.includes('html') || 
+                                    contentType.includes('json') || 
+                                    contentType.includes('text');
+              
+              // 最小サイズ制限（1KB未満は圧縮しない）
+              const MIN_COMPRESS_SIZE = 1024;
+              if (!isTextResponse || fullData.length < MIN_COMPRESS_SIZE) {
+                logger.info(`[圧縮スキップ][${label}] ${displayPath} - 条件未満: テキスト=${isTextResponse}, サイズ=${fullData.length}`);
+                return originalEnd.call(this, fullData);
+              }
+              
+              // 圧縮処理
+              zlib.gzip(fullData, {
+                level: 9,
+                memLevel: 9,
+                windowBits: 15
+              }, (err, compressed) => {
+                // 圧縮処理中にレスポンスが既に終了している場合は何もしない
+                if (res.headersSent && res.finished) {
+                  return;
+                }
+                
+                if (err) {
+                  logger.warn(`[圧縮エラー][${label}] ${displayPath}: ${err.message}`);
+                  return originalEnd.call(this, fullData);
+                }
+                
+                // 圧縮効果の確認
+                const compressionRatio = compressed.length / fullData.length;
+                const threshold = getCompressionThreshold();
+                logger.info(`[圧縮結果][${label}] ${displayPath} - 圧縮率: ${(compressionRatio * 100).toFixed(1)}%, 閾値: ${(threshold * 100).toFixed(1)}%`);
+                
+                if (compressionRatio < threshold) {
+                  // 圧縮レスポンスの送信
+                  res.setHeader('Content-Encoding', 'gzip');
+                  res.setHeader('Content-Length', compressed.length);
+                  
+                  logger.info(`[圧縮適用][${label}] ${displayPath} サイズ: ${fullData.length} → ${compressed.length} bytes (圧縮率: ${(compressionRatio * 100).toFixed(1)}%)`);
+                  originalEnd.call(this, compressed);
+                } else {
+                  logger.info(`[圧縮スキップ][${label}] ${displayPath} - 圧縮効果が不十分: ${(compressionRatio * 100).toFixed(1)}% >= ${(threshold * 100).toFixed(1)}%`);
+                  originalEnd.call(this, fullData);
+                }
+              });
+            };
+          }
+        }
+        
+        // テキストファイルの圧縮処理（WebDAV処理の前）
+        const textExts = ['.html', '.htm', '.css', '.js', '.json', '.xml', '.txt', '.md'];
+        const isTextFile = textExts.includes(ext.toLowerCase());
+        
+        if (getCompressionEnabled() && req.method === 'GET' && isTextFile && typeof res.setHeader === 'function') {
+          // 圧縮対応の確認
+          const acceptEncoding = req.headers['accept-encoding'] || '';
+          const supportsGzip = acceptEncoding.includes('gzip');
+          
+          if (supportsGzip) {
+            try {
+              // ファイルの存在確認
+              const fileStat = await statPWrap(fullPath).catch(() => null);
+              if (fileStat && fileStat.isFile() && fileStat.size > 1024) { // 1KB以上の場合のみ圧縮
+                // ファイル読み込みと圧縮（高性能環境向け非同期処理）
+                const fileData = await fs.promises.readFile(fullPath);
+                const compressed = await new Promise((resolve, reject) => {
+                  zlib.gzip(fileData, { 
+                    level: 9,        // 圧縮レベル（高品質圧縮、CPUリソースを最大活用）
+                    memLevel: 9,     // メモリ使用量（64GB環境で最大メモリ使用）
+                    windowBits: 15   // ウィンドウサイズ（最大32KB）
+                  }, (err, result) => {
+                    if (err) reject(err);
+                    else resolve(result);
+                  });
+                });
+                
+                // 圧縮効果の確認（環境変数で閾値を制御可能）
+                const compressionRatio = compressed.length / fileData.length;
+                if (compressionRatio < getCompressionThreshold()) {
+                  // 圧縮レスポンスの送信
+                  res.writeHead(200, {
+                    'Content-Type': getContentType(ext),
+                    'Content-Encoding': 'gzip',
+                    'Content-Length': compressed.length,
+                    'Vary': 'Accept-Encoding'
+                  });
+                  res.end(compressed);
+                  logger.info(`[ファイル圧縮完了][${label}] ${displayPath} サイズ: ${fileData.length} → ${compressed.length} bytes (圧縮率: ${(compressionRatio * 100).toFixed(1)}%)`);
+                  return; // 圧縮レスポンスを送信して処理終了
+                }
+              }
+            } catch (compressError) {
+              logger.warn(`[ファイル圧縮エラー][${label}] ${displayPath}: ${compressError.message}`);
+            }
+          }
+        }
+        
         server.executeRequest(req, res); // WebDAVサーバーにリクエストを処理させる
       } catch (e) {
         logger.error("WebDAV error", e); // エラーログを出力
-        if (!res.headersSent) {
+        if (!res.headersSent && typeof res.writeHead === 'function') {
           res.writeHead(500); // Internal Server Error
           res.end("WebDAV error"); // エラーメッセージを返す
-        } else res.end(); // 既にヘッダーが送信されている場合はレスポンスを終了
+        } else if (typeof res.end === 'function') {
+          res.end(); // 既にヘッダーが送信されている場合はレスポンスを終了
+        }
       }
     });
 
@@ -903,7 +1223,8 @@ function startWebDAV(config) {
      */
     httpServer.listen(PORT, () => {
       logger.info(`✅ WebDAV [${label}] 起動: http://localhost:${PORT}/`); // 起動完了ログを出力
-      logger.info(`[INFO] キャッシュDir=${CACHE_DIR} / MAX_LIST=${MAX_LIST} / Photo_Size=${Photo_Size ?? "オリジナル"}`); // キャッシュ設定ログを出力
+      logger.info(`[INFO] キャッシュDir=${CACHE_DIR} / MAX_LIST=${getMaxList()} / Photo_Size=${getPhotoSize() ?? "オリジナル"}`); // キャッシュ設定ログを出力
+      logger.info(`[INFO] 圧縮機能=${getCompressionEnabled() ? "有効" : "無効"} / 圧縮閾値=${(getCompressionThreshold() * 100).toFixed(1)}%`); // 圧縮設定ログを出力
     });
   });
 }

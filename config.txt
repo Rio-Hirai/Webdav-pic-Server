@@ -1,0 +1,25 @@
+# WebDAV画像変換サーバー設定ファイル
+# 設定変更後、サーバーの自動再読み込み（30秒以内）
+
+# 圧縮設定
+COMPRESSION_ENABLED=true
+COMPRESSION_THRESHOLD=0.3
+
+# 画像変換設定（デフォルト値）
+DEFAULT_QUALITY=30
+PHOTO_SIZE=640
+
+# キャッシュ設定（ミリ秒）
+CACHE_TTL_MS=300000
+CACHE_MIN_SIZE=1048576
+
+# サーバー設定
+MAX_LIST=1280
+
+# 再起動設定
+RESTART_ENABLED=false
+RESTART_TIME=03:00
+
+# ImageMagick設定
+MAGICK_PATH=magick
+

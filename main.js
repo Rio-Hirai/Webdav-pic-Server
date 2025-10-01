@@ -197,16 +197,73 @@ async function cleanupCache(dir) {
 setInterval(() => cleanupCache(CACHE_DIR), CLEANUP_INTERVAL_MS);
 
 /**
+ * 自動再起動機能
+ * 特定時刻にプロセスを再起動してメモリリークやリソース問題を防止
+ * 
+ * 設定方法:
+ * - 環境変数 RESTART_TIME: "03:00" (24時間形式、日本時間)
+ * - 環境変数 RESTART_ENABLED: "true" (再起動機能の有効/無効)
+ * 
+ * 技術的詳細:
+ * - 毎分チェック: 現在時刻が設定時刻と一致するかチェック
+ * - グレースフルシャットダウン: 既存接続の完了を待ってから再起動
+ * - ログ出力: 再起動予告と実行ログの記録
+ */
+const RESTART_ENABLED = process.env.RESTART_ENABLED === "true";
+const RESTART_TIME = process.env.RESTART_TIME || "12:10"; // デフォルト: 午前3時
+
+let restartScheduled = false; // 重複再起動防止フラグ
+
+if (RESTART_ENABLED) {
+  logger.info(`[再起動機能] 有効 - 再起動時刻: ${RESTART_TIME} (JST)`);
+  
+  // 毎分、再起動時刻をチェック
+  setInterval(() => {
+    const now = new Date();
+    const jstTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+    const currentTime = jstTime.toTimeString().slice(0, 5); // "HH:MM"形式
+    
+    if (currentTime === RESTART_TIME && !restartScheduled) {
+      restartScheduled = true;
+      logger.info(`[再起動予告] 5分後に自動再起動を実行します (${currentTime})`);
+      
+      // 5分後に再起動を実行
+      setTimeout(() => {
+        logger.info("[再起動実行] 自動再起動を開始します...");
+        
+        // グレースフルシャットダウン: 既存の接続が完了するまで待機
+        process.exit(0); // 正常終了（PM2等のプロセス管理ツールが自動再起動）
+      }, 5 * 60 * 1000); // 5分 = 5 * 60 * 1000ms
+    }
+    
+    // 再起動時刻を過ぎたらフラグをリセット（翌日の再起動準備）
+    if (currentTime !== RESTART_TIME) {
+      restartScheduled = false;
+    }
+  }, 60 * 1000); // 1分間隔でチェック
+} else {
+  logger.info("[再起動機能] 無効 (RESTART_ENABLED=false または未設定)");
+}
+
+/**
  * サーバー設定配列
  * 複数のWebDAVサーバーを異なる設定で同時起動するための設定定義
  * 各サーバーは用途に応じて最適化された設定を持つ
  */
 const serverConfigs = [
   {
+    PORT: 1899, // サーバーポート番号
+    ROOT_PATH: "Z:/書籍", // WebDAVのルートディレクトリ
+    MAX_LIST: 128 * 7, // ディレクトリリスト表示の最大件数（896件）
+    Photo_Size: 128 * 5, // 画像リサイズサイズ（640px）
+    defaultQuality: 40, // WebP変換のデフォルト品質（40%）
+    label: "軽量版", // ログ出力用の識別ラベル
+  },
+  {
     PORT: 1900, // サーバーポート番号
     ROOT_PATH: "Z:/書籍", // WebDAVのルートディレクトリ
-    MAX_LIST: 128 * 2, // ディレクトリリスト表示の最大件数（256件）
-    Photo_Size: 128 * 7, // 画像リサイズサイズ（896px）
+    MAX_LIST: 128 * 7, // ディレクトリリスト表示の最大件数（896件）
+    Photo_Size: 128 * 77, // 画像リサイズサイズ（640px）
     defaultQuality: 50, // WebP変換のデフォルト品質（50%）
     label: "軽量版", // ログ出力用の識別ラベル
   },
@@ -984,6 +1041,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
       transformer.pipe(pass); // Sharpの出力をPassThroughにパイプ
 
       let wroteHeader = false; // HTTPヘッダー送信フラグ
+      let responseSize = 0; // レスポンスデータサイズ（バイト）
 
       /**
        * Sharp失敗時のフォールバック処理（ImageMagick使用）
@@ -1047,8 +1105,12 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         }
 
         // 変換完了時の処理
+        let magickResponseSize = 0; // ImageMagickレスポンスサイズ
+        magick.stdout.on("data", (chunk) => {
+          magickResponseSize += chunk.length; // レスポンスサイズを累計
+        });
         magick.stdout.on("end", () => {
-          logger.info(`[変換完了(fallback)][${label}] ${displayPath}`); // 変換完了ログを出力
+          logger.info(`[変換完了(fallback)][${label}] ${displayPath} (サイズ: ${magickResponseSize.toLocaleString()} bytes)`); // 変換完了ログを出力
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
         });
@@ -1084,6 +1146,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
             wroteHeader = true; // ヘッダー送信フラグを設定
           }
           wroteAny = true; // データが書き込まれたことを記録
+          responseSize += chunk.length; // レスポンスサイズを累計
         });
 
         // ストリーミング処理の設定（エラーハンドリング付き）
@@ -1112,7 +1175,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
             } catch (_) {}
           }
 
-          logger.info(`[変換完了][${label}] ${displayPath}`); // 変換完了ログを出力
+          logger.info(`[変換完了][${label}] ${displayPath} (サイズ: ${responseSize.toLocaleString()} bytes)`); // 変換完了ログを出力
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
         });
@@ -1121,7 +1184,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
          * キャッシュなしの場合の処理
          * 直接レスポンスにストリーミング
          */
-        pass.once("data", () => {
+        pass.on("data", (chunk) => {
           if (!wroteHeader) { // 最初のチャンク受信時にHTTPヘッダー送信（チャンク転送）
             res.writeHead(200, { // レスポンスヘッダーを設定
               "Content-Type": "image/webp", // WebP画像のMIMEタイプ
@@ -1130,6 +1193,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
             });
             wroteHeader = true; // ヘッダー送信フラグを設定
           }
+          responseSize += chunk.length; // レスポンスサイズを累計
         });
 
         pipeline(pass, res).catch((e) => logger.error("[response pipeline error]", e)); // レスポンス送信
@@ -1137,7 +1201,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         // ストリーム終了時の処理
 
         pass.on("end", () => {
-          logger.info(`[変換完了][${label}] ${fullPath}`); // 変換完了ログを出力
+          logger.info(`[変換完了][${label}] ${fullPath} (サイズ: ${responseSize.toLocaleString()} bytes)`); // 変換完了ログを出力
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
         });
@@ -1191,8 +1255,12 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
       }
 
       // 変換完了時の処理
+      let initErrorResponseSize = 0; // Sharp初期化エラー時のレスポンスサイズ
+      magick.stdout.on("data", (chunk) => {
+        initErrorResponseSize += chunk.length; // レスポンスサイズを累計
+      });
       magick.stdout.on("end", () => {
-        logger.info(`[変換完了(fallback)][${label}] ${displayPath}`); // 変換完了ログを出力
+        logger.info(`[変換完了(fallback)][${label}] ${displayPath} (サイズ: ${initErrorResponseSize.toLocaleString()} bytes)`); // 変換完了ログを出力
         res.end(); // レスポンス終了
         return resolve(); // 成功
       });

@@ -1,11 +1,19 @@
 {
     "cSpell.words": [
         "Authentification",
+        "choco",
+        "cpus",
+        "EACCES",
+        "ENOENT",
         "EXIF",
         "libvips",
         "magick",
+        "opendir",
+        "Owlfiles",
+        "pgrep",
         "PROPFIND",
         "PROPPATCH",
+        "Readdle",
         "webdav"
     ]
 }

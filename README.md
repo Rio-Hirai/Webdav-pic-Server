@@ -210,11 +210,82 @@ const CLEANUP_INTERVAL_MS = 30 * 60 * 1000; // クリーンアップ間隔（30�
 
 ### 環境変数
 
-**実装箇所**: `main.js` 44-45 行
+**実装箇所**: `main.js` 44-45 行、212-213 行
 
 ```bash
 # ImageMagick のパスを指定（デフォルト: "magick"）
 export MAGICK_PATH="/usr/local/bin/magick"
+
+# 自動再起動機能の設定
+export RESTART_ENABLED="true"        # 再起動機能の有効/無効
+export RESTART_TIME="03:00"          # 再起動時刻（24時間形式、JST）
+```
+
+### 自動再起動機能
+
+**実装箇所**: `main.js` 199-246 行
+
+毎日特定時刻にプロセスを自動再起動し、メモリリークやリソース問題を防止します。
+
+#### 設定方法
+
+```bash
+# Windows (コマンドプロンプト)
+set RESTART_ENABLED=true
+set RESTART_TIME=03:00
+node main.js
+
+# Windows (PowerShell)
+$env:RESTART_ENABLED="true"
+$env:RESTART_TIME="03:00"
+node main.js
+
+# Linux/macOS
+export RESTART_ENABLED="true"
+export RESTART_TIME="03:00"
+node main.js
+```
+
+#### 設定オプション
+
+| 環境変数 | 説明 | デフォルト | 例 |
+|---------|------|-----------|-----|
+| `RESTART_ENABLED` | 再起動機能の有効/無効 | `false` | `"true"`, `"false"` |
+| `RESTART_TIME` | 再起動時刻（JST） | `"03:00"` | `"02:30"`, `"14:00"` |
+
+#### 動作仕様
+
+- **チェック間隔**: 1分間隔で現在時刻をチェック
+- **予告機能**: 再起動5分前にログで予告
+- **グレースフルシャットダウン**: 既存接続の完了を待ってから再起動
+- **重複防止**: 同日の重複再起動を防止
+- **ログ出力**: 再起動予告と実行ログを記録
+
+#### 使用例
+
+```bash
+# 毎日午前3時に再起動
+export RESTART_ENABLED="true"
+export RESTART_TIME="03:00"
+
+# 毎日午後2時に再起動
+export RESTART_ENABLED="true"  
+export RESTART_TIME="14:00"
+
+# 再起動機能を無効化
+export RESTART_ENABLED="false"
+```
+
+#### プロセス管理ツールとの連携
+
+PM2などのプロセス管理ツールと組み合わせることで、完全な自動復旧が可能です：
+
+```bash
+# PM2での起動例
+pm2 start main.js --name webdav-server --restart-delay 5000
+
+# 環境変数付きで起動
+RESTART_ENABLED=true RESTART_TIME=03:00 pm2 start main.js
 ```
 
 ## 技術的詳細

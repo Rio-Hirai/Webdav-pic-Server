@@ -59,7 +59,7 @@ const logger = {
 const MAGICK_CMD = process.env.MAGICK_PATH || "magick";
 
 // 設定ファイル監視と動的設定更新機能
-const CONFIG_FILE = "./config.txt";
+const CONFIG_FILE = path.join(__dirname, "config.txt");
 const CONFIG_WATCH_INTERVAL = 10000; // 10秒間隔で設定ファイルを監視（より迅速な変更検出）
 
 // 前回の設定値を保存するオブジェクト

@@ -16,36 +16,41 @@ const webdav = require("webdav-server").v2; // WebDAVサーバー実装 - RFC491
 const pLimit = require("p-limit"); // 並列処理制御 - 同時実行数の制限によるリソース保護、メモリ枯渇防止
 const { LRUCache } = require("lru-cache"); // LRUキャッシュ実装 - メモリ効率的なキャッシュ管理、TTL対応、サイズ制限
 
-// 設定管理モジュール
-const config = require("./.core/config");
-const {
-  logger,
-  MAGICK_CMD,
-  getDynamicConfig,
-  loadConfig,
-  getCompressionEnabled,
-  getCompressionThreshold,
-  getCacheMinSize,
-  getCacheTTL,
-  getMaxConcurrency,
-  getSharpMemoryLimit,
-  getSharpPixelLimit,
-  getRateLimitEnabled,
-  getRateLimitRequests,
-  getRateLimitWindow,
-  getRateLimitQueueSize,
-  getMaxActiveRequests,
-  getRequestTimeout,
-  getDropRequestsWhenOverloaded,
-  getAggressiveDropEnabled,
-  getAggressiveDropThreshold,
-  getAggressiveDropWindow,
-  getEmergencyResetEnabled,
-  getEmergencyResetThreshold,
-  getEmergencyResetWindow
-} = config;
+// 設定関連モジュール
+const { logger, getDynamicConfig, loadConfig, CONFIG_FILE } = require("./.core/config");
 
+// スタック処理システムモジュール
+const { RequestStack, SimpleServerMonitor } = require("./.core/stack");
 
+// キャッシュ管理モジュール
+const { 
+  CACHE_DIR, 
+  FALLBACK_CACHE_DIR, 
+  CLEANUP_INTERVAL_MS, 
+  getCacheMinSize, 
+  getCacheTTL, 
+  resetCacheSync, 
+  initializeCacheDirectory, 
+  cleanupCache, 
+  createLRUCaches, 
+  CachedFileSystem 
+} = require("./.core/cache");
+
+// WebDAVサーバーモジュール
+const { startWebDAV } = require("./.core/server");
+
+// ImageMagickコマンドパス設定
+// 環境変数MAGICK_PATHが設定されていればそれを使用、未設定の場合は"magick"をデフォルトとする
+const MAGICK_CMD = process.env.MAGICK_PATH || "magick";
+
+// 圧縮機能の有効/無効制御（動的設定対応）
+function getCompressionEnabled() {
+  return process.env.COMPRESSION_ENABLED !== "false";
+}
+
+function getCompressionThreshold() {
+  return parseFloat(process.env.COMPRESSION_THRESHOLD) || 0.3;
+}
 
 /**
  * Sharpライブラリのパフォーマンス最適化設定
@@ -74,10 +79,50 @@ const {
 const PassThrough = stream.PassThrough;
 const pipeline = promisify(stream.pipeline);
 
-// キャッシュ管理モジュール
-const cache = require("./.core/cache");
-const { initializeCacheSystem } = cache;
+/**
+ * 画像キャッシュシステム設定
+ * 変換済み画像の一時保存による高速化とサーバー負荷軽減を実現（したはず？ 高スペックCPUだと違いが分からない）
+ *
+ * 技術的詳細:
+ * - ファイルベースキャッシュ: 変換結果をWebPファイルとして保存
+ * - 原子的更新: 一時ファイル→リネームによる整合性保証
+ * - TTL管理: 期限切れファイルの自動削除によるディスク容量管理
+ * - サイズフィルタ: 小ファイルはキャッシュ対象外（オーバーヘッド回避）
+ */
+// キャッシュディレクトリの設定（権限問題対応）
+// CACHE_DIR, FALLBACK_CACHE_DIR, CLEANUP_INTERVAL_MSは.cache.jsモジュールから取得
 
+// 動的キャッシュ設定読み込み関数（.cache.jsモジュールから取得済み）
+
+// メモリ管理設定読み込み関数
+  const getMaxConcurrency = () => getDynamicConfig('MAX_CONCURRENCY', 2); // 最大並列処理数（大量アクセス対策）
+  const getSharpMemoryLimit = () => getDynamicConfig('SHARP_MEMORY_LIMIT', 64); // Sharpメモリキャッシュ制限（MB）
+  const getSharpPixelLimit = () => getDynamicConfig('SHARP_PIXEL_LIMIT', 10000000); // Sharpピクセル制限
+
+  // レート制限設定読み込み関数
+  const getRateLimitEnabled = () => {
+    const emergencyDisable = getDynamicConfig('EMERGENCY_DISABLE_RATE_LIMIT', false);
+    if (emergencyDisable) return false; // 緊急時は無効化
+    return getDynamicConfig('RATE_LIMIT_ENABLED', true);
+  };
+  const getRateLimitRequests = () => getDynamicConfig('RATE_LIMIT_REQUESTS', 50); // 1分間あたりのリクエスト数
+  const getRateLimitWindow = () => getDynamicConfig('RATE_LIMIT_WINDOW_MS', 60000); // 時間窓（ミリ秒）
+  const getRateLimitQueueSize = () => getDynamicConfig('RATE_LIMIT_QUEUE_SIZE', 100); // キューサイズ制限
+
+  // 過負荷対策設定読み込み関数
+  const getMaxActiveRequests = () => getDynamicConfig('MAX_ACTIVE_REQUESTS', 10); // 最大同時リクエスト数
+  const getRequestTimeout = () => getDynamicConfig('REQUEST_TIMEOUT_MS', 5000); // リクエストタイムアウト（ミリ秒）
+  const getDropRequestsWhenOverloaded = () => getDynamicConfig('DROP_REQUESTS_WHEN_OVERLOADED', true); // 過負荷時のリクエスト破棄
+
+  // 積極的破棄設定読み込み関数
+  const getAggressiveDropEnabled = () => getDynamicConfig('AGGRESSIVE_DROP_ENABLED', true); // 積極的破棄有効
+  const getAggressiveDropThreshold = () => getDynamicConfig('AGGRESSIVE_DROP_THRESHOLD', 20); // 破棄閾値（リクエスト数）
+  const getAggressiveDropWindow = () => getDynamicConfig('AGGRESSIVE_DROP_WINDOW_MS', 3000); // 時間窓（ミリ秒）
+
+  // 緊急リセット設定読み込み関数
+  const getEmergencyResetEnabled = () => getDynamicConfig('EMERGENCY_RESET_ENABLED', true); // 緊急リセット有効
+  const getEmergencyResetThreshold = () => getDynamicConfig('EMERGENCY_RESET_THRESHOLD', 15); // リセット閾値（リクエスト数）
+  const getEmergencyResetWindow = () => getDynamicConfig('EMERGENCY_RESET_WINDOW_MS', 3000); // 時間窓（ミリ秒）
 
 // Sharpの初期設定関数（動的設定関数の定義後に配置）
 function configureSharp() {
@@ -102,287 +147,29 @@ function configureSharp() {
 // Sharpの初期設定を実行
 configureSharp();
 
-  /**
-   * リクエストスタッククラス
-   * LIFO（Last In, First Out）方式でリクエストを処理
-   * 最新のリクエスト（ユーザーが現在見ようとしている画像）を最優先で処理
-   */
-  class RequestStack {
-    constructor() {
-      this.stack = []; // リクエストスタック
-      this.processing = false; // 処理中フラグ
-      this.maxStackSize = 100; // スタックの最大サイズ
-      this.processedCount = 0; // 処理済みリクエスト数
-      this.lastProcessTime = Date.now(); // 最後の処理時刻
-      this.stuckCheckInterval = null; // スタック監視のインターバル
-      this.currentFolder = null; // 現在のフォルダパス
-      this.folderChangeCount = 0; // フォルダ変更回数
+// 設定変更時のコールバックを登録
+global.configureSharpCallback = configureSharp;
 
-      // スタック監視を開始（5秒間隔でチェック）
-      this.startStuckMonitoring();
-    }
+// スタック処理システムのインスタンス作成
+const requestStack = new RequestStack();
+const serverMonitor = new SimpleServerMonitor();
 
-  // リクエストをスタックに追加
-  push(requestInfo) {
-    // フォルダ変更検出
-    const requestFolder = this.extractFolderFromPath(requestInfo.displayPath);
-    if (this.currentFolder !== null && this.currentFolder !== requestFolder) {
-      // フォルダが変更された場合はスタックをクリア
-      this.clearStackForFolderChange(requestFolder);
-    }
-    this.currentFolder = requestFolder;
+// グローバル変数として設定（スタックモジュールから参照するため）
+global.requestStack = requestStack;
 
-    // 積極的なスタックサイズ制限（50個で警告、80個で積極的破棄）
-    if (this.stack.length >= 80) {
-      // 80個以上の場合、古いリクエストを50%破棄
-      const removeCount = Math.floor(this.stack.length * 0.5);
-      for (let i = 0; i < removeCount; i++) {
-        const removed = this.stack.shift();
-        if (removed && removed.res && !removed.res.headersSent) {
-          removed.res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
-          removed.res.end('Request stack overflow. Please retry.');
-        }
-      }
-      logger.warn(`[スタック積極的破棄] ${removeCount}件の古いリクエストを破棄 (残り: ${this.stack.length})`);
-    } else if (this.stack.length >= 50) {
-      // 50個以上の場合、古いリクエストを25%破棄
-      const removeCount = Math.floor(this.stack.length * 0.25);
-      for (let i = 0; i < removeCount; i++) {
-        const removed = this.stack.shift();
-        if (removed && removed.res && !removed.res.headersSent) {
-          removed.res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
-          removed.res.end('Request stack overflow. Please retry.');
-        }
-      }
-      logger.warn(`[スタック部分破棄] ${removeCount}件の古いリクエストを破棄 (残り: ${this.stack.length})`);
-    } else if (this.stack.length >= this.maxStackSize) {
-      // 最大サイズの場合、古いリクエストを1件削除
-      const removed = this.stack.shift();
-      if (removed && removed.res && !removed.res.headersSent) {
-        removed.res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
-        removed.res.end('Request stack overflow. Please retry.');
-      }
-      logger.warn(`[スタックオーバーフロー] 古いリクエストを破棄: ${removed?.displayPath || 'unknown'}`);
-    }
-
-    // 新しいリクエストをスタックの最後に追加（LIFOのため最後が最優先）
-    this.stack.push(requestInfo);
-    logger.info(`[スタック追加] ${requestInfo.displayPath} (スタックサイズ: ${this.stack.length})`);
-
-    // 処理を開始
-    this.processNext();
-  }
-
-    // 次のリクエストを処理
-    async processNext() {
-      if (this.processing || this.stack.length === 0) {
-        return; // 既に処理中またはスタックが空の場合は何もしない
-      }
-
-      this.processing = true;
-      const requestInfo = this.stack.pop(); // スタックの最後から取得（最新のリクエスト）
-
-      // タイムアウト設定（8秒でタイムアウト）
-      const timeoutId = setTimeout(() => {
-        logger.warn(`[スタック処理タイムアウト] ${requestInfo.displayPath} - 8秒でタイムアウト`);
-        if (requestInfo.res && !requestInfo.res.headersSent) {
-          requestInfo.res.writeHead(408, { 'Content-Type': 'text/plain; charset=utf-8' });
-          requestInfo.res.end('Request timeout');
-        }
-        this.processing = false;
-        // 次のリクエストを処理
-        setTimeout(() => this.processNext(), 5);
-      }, 8000);
-
-      try {
-        logger.info(`[スタック処理開始] ${requestInfo.displayPath} (残り: ${this.stack.length})`);
-
-        // 最後の処理時刻を更新
-        this.lastProcessTime = Date.now();
-
-        // リクエスト処理を実行（タイムアウト付き）
-        await Promise.race([
-          requestInfo.processor(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Processor timeout')), 6000))
-        ]);
-
-        clearTimeout(timeoutId);
-        this.processedCount++;
-        this.lastProcessTime = Date.now(); // 完了時刻も更新
-        logger.info(`[スタック処理完了] ${requestInfo.displayPath} (処理済み: ${this.processedCount})`);
-
-      } catch (error) {
-        clearTimeout(timeoutId);
-        logger.error(`[スタック処理エラー] ${requestInfo.displayPath}: ${error.message}`);
-
-        // エラー時は適切なレスポンスを送信
-        if (requestInfo.res && !requestInfo.res.headersSent) {
-          requestInfo.res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-          requestInfo.res.end('Internal server error');
-        }
-      } finally {
-        this.processing = false;
-
-        // スタックに残りのリクエストがあれば次の処理を開始
-        if (this.stack.length > 0) {
-          // 次の処理を少し遅延させてCPU負荷を軽減
-          setTimeout(() => this.processNext(), 5);
-        }
-      }
-    }
-
-  // スタック監視を開始
-  startStuckMonitoring() {
-    this.stuckCheckInterval = setInterval(() => {
-      const now = Date.now();
-      const timeSinceLastProcess = now - this.lastProcessTime;
-
-      // 処理中で5秒以上経過している場合は強制復旧（より積極的）
-      if (this.processing && timeSinceLastProcess > 5000) {
-        logger.warn(`[スタック強制復旧] 処理が5秒以上停止しています - 強制復旧を実行`);
-        this.forceRecovery();
-      }
-
-      // スタックが30個以上溜まっている場合は警告
-      if (this.stack.length > 30) {
-        logger.warn(`[スタック警告] スタックが${this.stack.length}個に達しています`);
-      }
-
-      // スタックが60個以上溜まっている場合は積極的破棄
-      if (this.stack.length > 60) {
-        const removeCount = Math.floor(this.stack.length * 0.3); // 30%破棄
-        for (let i = 0; i < removeCount; i++) {
-          const removed = this.stack.shift();
-          if (removed && removed.res && !removed.res.headersSent) {
-            removed.res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
-            removed.res.end('Request stack emergency clear. Please retry.');
-          }
-        }
-        logger.warn(`[スタック緊急破棄] ${removeCount}件のリクエストを破棄 (残り: ${this.stack.length})`);
-        this.forceRecovery();
-      }
-
-      // スタックが100個以上溜まっている場合は強制復旧
-      if (this.stack.length > 100) {
-        logger.warn(`[スタック緊急復旧] スタックが${this.stack.length}個に達しています - 緊急復旧を実行`);
-        this.forceRecovery();
-      }
-    }, 3000); // 3秒間隔でチェック（より頻繁に監視）
-  }
-
-    // 強制復旧処理
-    forceRecovery() {
-      logger.error(`[スタック強制復旧実行] 処理中フラグをリセット`);
-      this.processing = false;
-      this.lastProcessTime = Date.now();
-
-      // 次のリクエストを処理
-      setTimeout(() => this.processNext(), 100);
-    }
-
-    // スタックの状態を取得
-    getStatus() {
-      return {
-        stackSize: this.stack.length,
-        processing: this.processing,
-        processedCount: this.processedCount,
-        maxStackSize: this.maxStackSize,
-        timeSinceLastProcess: Date.now() - this.lastProcessTime,
-        currentFolder: this.currentFolder,
-        folderChangeCount: this.folderChangeCount
-      };
-    }
-
-    // パスからフォルダを抽出
-    extractFolderFromPath(displayPath) {
-      // パスからフォルダ部分を抽出
-      const pathParts = displayPath.split('/');
-      if (pathParts.length <= 2) {
-        return displayPath; // ルートレベルの場合
-      }
-      // 最後の要素（ファイル名）を除いた部分をフォルダパスとする
-      return pathParts.slice(0, -1).join('/');
-    }
-
-    // フォルダ変更時のスタッククリア
-    clearStackForFolderChange(newFolder) {
-      this.folderChangeCount++;
-      const clearedCount = this.stack.length;
-
-      // スタック内のすべてのリクエストにエラーレスポンスを送信
-      this.stack.forEach(requestInfo => {
-        if (requestInfo.res && !requestInfo.res.headersSent) {
-          requestInfo.res.writeHead(410, { 
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Cache-Control': 'no-cache'
-          });
-          requestInfo.res.end('Request cancelled due to folder change');
-        }
-      });
-
-      // スタックをクリア
-      this.stack = [];
-
-      // 処理中フラグをリセット
-      this.processing = false;
-
-      logger.info(`[フォルダ変更検出] "${this.currentFolder}" → "${newFolder}" - ${clearedCount}件のリクエストを破棄 (変更回数: ${this.folderChangeCount})`);
-    }
-
-    // スタック監視を停止
-    stopMonitoring() {
-      if (this.stuckCheckInterval) {
-        clearInterval(this.stuckCheckInterval);
-        this.stuckCheckInterval = null;
-      }
-    }
-  }
-
-  const requestStack = new RequestStack();
-
-  /**
-   * シンプルなサーバー監視クラス
-   * スタック処理システム用の軽量な監視機能
-   */
-  class SimpleServerMonitor {
-    constructor() {
-      this.requestCount = 0;
-      this.lastLogTime = Date.now();
-    }
-
-    // リクエスト開始（スタック処理では単純にカウントのみ）
-    startRequest() {
-      this.requestCount++;
-      return `request-${this.requestCount}`;
-    }
-
-    // リクエスト終了（スタック処理では単純にカウントのみ）
-    endRequest() {
-      // 定期的にスタック状況をログ
-      const now = Date.now();
-      if (now - this.lastLogTime > 30000) { // 30秒ごと
-        const stackStatus = requestStack.getStatus();
-        logger.info(`[サーバー状況] 総リクエスト: ${this.requestCount}, スタック: ${stackStatus.stackSize}/${stackStatus.maxStackSize}, 処理中: ${stackStatus.processing}, フォルダ: ${stackStatus.currentFolder || 'none'}, 変更回数: ${stackStatus.folderChangeCount}`);
-        this.lastLogTime = now;
-      }
-    }
-
-    // 負荷状況取得
-    getLoadStatus() {
-      const stackStatus = requestStack.getStatus();
-      return {
-        totalRequests: this.requestCount,
-        stackSize: stackStatus.stackSize,
-        processing: stackStatus.processing,
-        processedCount: stackStatus.processedCount
-      };
-    }
-  }
-
-  const serverMonitor = new SimpleServerMonitor();
-
-// キャッシュシステムの初期化
-const activeCacheDir = initializeCacheSystem();
+// キャッシュディレクトリの初期化
+const activeCacheDir = initializeCacheDirectory();
+if (activeCacheDir) {
+  logger.info("=== キャッシュリセット中... ===");
+  resetCacheSync(activeCacheDir);
+  logger.info("=== キャッシュリセット完了 ===");
+  
+  // 定期クリーニングの開始（30分間隔で実行）
+  setInterval(() => cleanupCache(activeCacheDir), CLEANUP_INTERVAL_MS);
+  logger.info(`[定期クリーニング設定] ${activeCacheDir} を ${CLEANUP_INTERVAL_MS/1000}秒間隔で監視中`);
+} else {
+  logger.warn("=== キャッシュ機能が無効化されました ===");
+}
 
 /**
  * 自動再起動機能
@@ -471,19 +258,8 @@ const serverConfigs = [
  */
 serverConfigs.forEach((config) => startWebDAV(config));
 
-/**
- * WebDAVサーバー起動関数
- * 指定された設定でWebDAVサーバーとHTTPサーバーを起動し、画像変換機能を提供
- *
- * @param {Object} config - サーバー設定オブジェクト
- * @param {number} config.PORT - サーバーポート番号
- * @param {string} config.ROOT_PATH - WebDAVルートディレクトリ
- * @param {number} config.MAX_LIST - ディレクトリリスト最大件数
- * @param {number|null} config.Photo_Size - 画像リサイズサイズ（null=リサイズなし）
- * @param {number} config.defaultQuality - WebP変換デフォルト品質
- * @param {string} config.label - ログ識別ラベル
- */
-function startWebDAV(config) {
+// WebDAVサーバー起動関数は.core/server.jsモジュールに移動済み
+// 古い関数定義を削除
   // 設定の分割代入（動的設定読み込み対応）
   const { PORT, ROOT_PATH, label } = config;
   
@@ -499,25 +275,8 @@ function startWebDAV(config) {
   const DIR_TTL = 60 * 60 * 1000; // 1時間 - ディレクトリリストキャッシュの有効期間
   const STAT_TTL = 60 * 60 * 1000; // 1時間 - ファイル統計情報キャッシュの有効期間
 
-  /**
-   * LRUキャッシュインスタンスの作成
-   * メモリ効率的なキャッシュ管理により、頻繁にアクセスされるファイルシステム操作を高速化
-   *
-   * 技術的詳細:
-   * - LRUアルゴリズム: 最近使用されたエントリを優先保持
-   * - メモリ制限: 最大エントリ数によるメモリ使用量制御
-   * - TTL管理: 期限切れエントリの自動削除
-   * - 分離設計: ディレクトリリストとファイル統計を独立管理
-   */
-  const dirCache = new LRUCache({
-    max: 10000, // 最大10,000エントリ（ディレクトリリスト）- 大量画像フォルダでのメモリ不足を防ぐため削減
-    ttl: DIR_TTL, // TTL: 1時間
-  });
-
-  const statCache = new LRUCache({
-    max: 50000, // 最大50,000エントリ（ファイル統計情報）- 大量画像フォルダでのメモリ不足を防ぐため大幅削減
-    ttl: STAT_TTL, // TTL: 1時間
-  });
+  // LRUキャッシュインスタンスの作成
+  const { dirCache, statCache } = createLRUCaches();
 
   // スタック処理システムでは並列処理制限は不要（順次処理のため）
 
@@ -703,84 +462,6 @@ function startWebDAV(config) {
   });
 
 
-  /**
-   * キャッシュ機能付きWebDAVファイルシステムクラス
-   * webdav-serverのPhysicalFileSystemを拡張し、ディレクトリリストとファイル統計情報をキャッシュ化
-   * 大量のファイルがあるディレクトリでのWebDAV操作を高速化
-   */
-  class CachedFileSystem extends webdav.PhysicalFileSystem {
-    /**
-     * コンストラクタ
-     * @param {string} rootPath - WebDAVのルートディレクトリパス
-     * @param {LRUCache} dirCache - ディレクトリリストキャッシュ
-     * @param {LRUCache} statCache - ファイル統計情報キャッシュ
-     */
-    constructor(rootPath, dirCache, statCache) {
-      super(rootPath); // 親クラスのコンストラクタを呼び出し
-      this.dirCache = dirCache; // ディレクトリリストキャッシュ
-      this.statCache = statCache; // ファイル統計情報キャッシュ
-    }
-
-    /**
-     * ディレクトリ読み込みのキャッシュ化オーバーライド
-     * WebDAVのPROPFINDリクエストでディレクトリリストを取得する際にキャッシュを活用
-     *
-     * @param {string} path - ディレクトリパス
-     * @param {Object} ctx - WebDAVコンテキスト
-     * @param {Function} callback - コールバック関数
-     */
-    _readdir(path, ctx, callback) {
-      try {
-        const cached = this.dirCache.get(path); // キャッシュから取得
-        if (cached) return callback(null, cached.slice(0, getMaxList())); // キャッシュヒット時はMAX_LIST件まで返す
-      } catch (e) {
-        // キャッシュエラー時は親クラスの実装にフォールバック
-      }
-
-      // 親クラスの_readdirを呼び出し
-      super._readdir(path, ctx, (err, names) => {
-        if (!err && Array.isArray(names)) {
-          try {
-            const limited = names.slice(0, getMaxList()); // MAX_LIST件までに制限
-            this.dirCache.set(path, limited); // キャッシュに保存
-            return callback(null, limited); // 制限後の配列を返す
-          } catch (e) {
-            // キャッシュ保存エラーは無視
-          }
-        }
-        callback(err, names); // エラーまたはキャッシュ保存失敗時はそのまま返す
-      });
-    }
-
-    /**
-     * ファイル統計情報取得のキャッシュ化オーバーライド
-     * WebDAVのPROPFINDリクエストでファイル情報を取得する際にキャッシュを活用
-     *
-     * @param {string} path - ファイル/ディレクトリパス
-     * @param {Object} ctx - WebDAVコンテキスト
-     * @param {Function} callback - コールバック関数
-     */
-    _stat(path, ctx, callback) {
-      try {
-        const cached = this.statCache.get(path); // キャッシュから取得
-        if (cached) return callback(null, cached); // キャッシュヒット時はそのまま返す
-      } catch (e) {
-        // キャッシュエラー時は親クラスの実装にフォールバック
-      }
-
-      // 親クラスの_statを呼び出し
-      super._stat(path, ctx, (err, stat) => {
-        if (!err && stat) {
-          try {
-            this.statCache.set(path, stat); // キャッシュに保存
-          } catch (e) {
-            // キャッシュ保存エラーは無視
-          }
-        }
-        callback(err, stat); // エラーまたはキャッシュ保存失敗時はそのまま返す
-      });
-    }
-  }
 
   /**
    * WebDAVサーバーのファイルシステムマウント
@@ -953,7 +634,7 @@ function startWebDAV(config) {
             .createHash("md5") // MD5ハッシュアルゴリズムを使用
             .update(fullPath + "|" + (getPhotoSize() ?? "o") + "|" + quality + "|" + String(st.mtimeMs) + "|" + String(st.size)) // 複数パラメータを連結
             .digest("hex"); // キャッシュキーを生成
-          const cachePath = activeCacheDir ? path.join(activeCacheDir, key + ".webp") : null; // キャッシュファイルのパス
+          const cachePath = path.join(CACHE_DIR, key + ".webp"); // キャッシュファイルのパス
 
           /**
            * キャッシュファイルの存在確認とレスポンス
@@ -1226,7 +907,7 @@ function startWebDAV(config) {
      */
     httpServer.listen(PORT, () => {
       logger.info(`✅ WebDAV [${label}] 起動: http://localhost:${PORT}/`); // 起動完了ログを出力
-      logger.info(`[INFO] キャッシュDir=${activeCacheDir || "無効"} / MAX_LIST=${getMaxList()} / Photo_Size=${getPhotoSize() ?? "オリジナル"}`); // キャッシュ設定ログを出力
+      logger.info(`[INFO] キャッシュDir=${CACHE_DIR} / MAX_LIST=${getMaxList()} / Photo_Size=${getPhotoSize() ?? "オリジナル"}`); // キャッシュ設定ログを出力
       logger.info(`[INFO] 圧縮機能=${getCompressionEnabled() ? "有効" : "無効"} / 圧縮閾値=${(getCompressionThreshold() * 100).toFixed(1)}%`); // 圧縮設定ログを出力
     });
   });
@@ -2046,3 +1727,6 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
     });
   });
 }
+
+// 複数サーバーの起動（新しいモジュールを使用）
+startWebDAV(serverConfigs, requestStack, serverMonitor, convertAndRespond);

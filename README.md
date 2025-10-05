@@ -27,6 +27,7 @@
 
 - **画像拡張子判定**: `.core/webdav.js` - `IMAGE_EXTS`配列で対応形式を定義
 - **変換処理メイン**: `.core/image.js` - `convertAndRespond`関数で Sharp/ImageMagick による変換処理
+- **並列処理制限**: `.core/image.js` - `convertAndRespondWithLimit`関数で並列数制御とin-flight管理
 - **Sharp 設定**: `main.js` 94-111 行 - パフォーマンス最適化設定（並列度制御、メモリキャッシュ、ファイルキャッシュ）
 - **品質パラメータ処理**: `.core/webdav.js` - クエリパラメータ`q`の取得と検証（30-90 の範囲制限）
 - **画像処理モード**: `.core/image.js` - 3つの処理モード（高速処理、バランス処理、高品質処理）
@@ -464,6 +465,13 @@ RESTART_ENABLED=true RESTART_TIME=03:00 pm2 start main.js
 - **少量リクエスト時**: FIFO（先入先出し）で順序を保持し公平性を確保
 - **大量リクエスト時**: LIFO（後入先出し）でユーザビリティを優先
 
+#### 並列処理最適化
+
+- **並列数制限**: p-limitによる同時実行数の制御（メモリ枯渇・CPU過負荷防止）
+- **in-flight管理**: 重複変換防止とタイムアウト管理による安定性向上
+- **動的並列制御**: config.txtのMAX_CONCURRENCYでリアルタイム調整可能
+- **ハイブリッド処理**: スタック処理（順次）と並列処理制限の組み合わせ
+
 #### セキュリティ設計
 
 - **パストラバーサル対策**: プラットフォーム対応の安全なパス解決
@@ -632,6 +640,7 @@ du -sh Y:/caches/webdav/tmp
 | `CachedFileSystem`    | .core/webdav.js | キャッシュ機能付き WebDAV ファイルシステム（LRU キャッシュ統合）            |
 | `safeResolve()`       | .core/webdav.js | セキュアなパス解決（パストラバーサル対策、プラットフォーム対応）            |
 | `convertAndRespond()` | .core/image.js | 画像変換・レスポンス送信（Sharp/ImageMagick、原子的更新）                   |
+| `convertAndRespondWithLimit()` | .core/image.js | 並列制限付き画像変換（p-limit、in-flight管理、重複防止）                    |
 | `readdirSyncWrap()`   | .core/webdav.js | 同期ディレクトリ読み込みキャッシュ（ストリーミング読み込み、MAX_LIST 制限） |
 | `statSyncWrap()`      | .core/webdav.js | 同期ファイル統計キャッシュ（エラーハンドリング、デフォルト値）              |
 | `readdirPWrap()`      | .core/webdav.js | 非同期ディレクトリ読み込みキャッシュ（非同期 opendir、エラー回復）          |
@@ -643,7 +652,7 @@ du -sh Y:/caches/webdav/tmp
 2. **設定監視**: .core/config.js → 設定ファイル監視 → 設定値検証 → 差分検出 → 環境変数更新 → ログ出力
 3. **リクエスト受信**: .core/webdav.js → HTTP サーバー → セキュアパス解決 → 画像拡張子判定
 4. **スタック処理**: .core/webdav.js → 画像変換リクエスト → .core/stack.js に追加 → 適応的処理方式（FIFO/LIFO切り替え）で順次処理 → フォルダ変更検出時の自動破棄
-5. **画像変換**: .core/image.js → キャッシュキー生成 → キャッシュチェック → Sharp/ImageMagick 変換 → 原子的キャッシュ更新 → ストリーミングレスポンス
+5. **画像変換**: .core/image.js → 並列制限チェック → in-flight重複チェック → キャッシュキー生成 → キャッシュチェック → Sharp/ImageMagick 変換 → 原子的キャッシュ更新 → ストリーミングレスポンス
 6. **WebDAV 処理**: .core/webdav.js → ファイルシステム操作 → LRU キャッシュ活用 → セキュリティチェック → HTTP圧縮 → レスポンス
 
 ## API リファレンス
@@ -672,6 +681,11 @@ ISC
 
 ## 更新履歴
 
+- **v22.1.2**: 並列処理性能最適化
+  - ⚡ **並列処理制限**: p-limitによる同時実行数制御でメモリ枯渇・CPU過負荷を防止
+  - 🔄 **in-flight管理**: 重複変換防止とタイムアウト管理による安定性向上
+  - 🎛️ **動的並列制御**: config.txtのMAX_CONCURRENCYでリアルタイム調整可能
+  - 🔧 **ハイブリッド処理**: スタック処理と並列処理制限の組み合わせ
 - **v22.1.1**: 適応的スタック処理システム
   - 🔄 **適応的処理方式**: 30件以下はFIFO、30件超はLIFOで自動切り替え
   - ⚖️ **公平性とユーザビリティの両立**: 少量リクエスト時は順序保持、大量リクエスト時は最新優先

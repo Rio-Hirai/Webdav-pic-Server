@@ -31,7 +31,7 @@ const {
 const { initializeStackSystem } = require("./stack");
 
 // 画像変換モジュール
-const { convertAndRespond } = require("./image");
+const { convertAndRespond, convertAndRespondWithLimit } = require("./image");
 
 const PassThrough = stream.PassThrough;
 const pipeline = promisify(stream.pipeline);
@@ -545,8 +545,8 @@ function startWebDAV(activeCacheDir) {
               }
             }
 
-            // 画像変換を実行
-            await convertAndRespond({ 
+            // 画像変換を実行（並列制限付き）
+            await convertAndRespondWithLimit({ 
               fullPath, 
               displayPath, 
               cachePath: shouldCache ? cachePath : null, 

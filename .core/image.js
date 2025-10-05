@@ -17,10 +17,75 @@ const stream = require("stream");
 const { promisify } = require("util");
 const { spawn } = require("child_process");
 const sharp = require("sharp");
-const { logger, MAGICK_CMD, getSharpPixelLimit, getImageMode } = require("./config");
+const pLimit = require("p-limit");
+const { logger, MAGICK_CMD, getSharpPixelLimit, getImageMode, getMaxConcurrency } = require("./config");
 
 const PassThrough = stream.PassThrough;
 const pipeline = promisify(stream.pipeline);
+
+/**
+ * 並列処理制限とin-flight管理
+ * 大量の画像変換リクエストに対する適切な並列制御を提供
+ */
+const maxConcurrency = getMaxConcurrency(); // 動的設定から並列数を取得
+const conversionLimit = pLimit(maxConcurrency); // p-limitによる並列制限
+const inFlightConversions = new Map(); // in-flight変換の管理（重複変換防止）
+
+logger.info(`[画像変換並列制御] 最大並列数: ${maxConcurrency}, in-flight管理: 有効`);
+
+/**
+ * 並列制限付き画像変換・レスポンス送信関数
+ * in-flight重複防止と並列数制限を適用
+ */
+async function convertAndRespondWithLimit(params) {
+  const { fullPath, displayPath, cachePath, quality, Photo_Size, res, clientIP } = params;
+  
+  // キャッシュキー生成（重複変換検出用）
+  const cacheKey = `${fullPath}-${quality}-${Photo_Size}`;
+  
+  // in-flight重複チェック
+  if (inFlightConversions.has(cacheKey)) {
+    logger.info(`[重複変換防止] 同じ画像の変換が進行中: ${displayPath}`);
+    
+    // 既存の変換完了を待つ
+    return new Promise((resolve, reject) => {
+      const checkInterval = setInterval(() => {
+        if (!inFlightConversions.has(cacheKey)) {
+          clearInterval(checkInterval);
+          // 変換完了後、キャッシュファイルから読み込んで送信
+          if (cachePath && fs.existsSync(cachePath)) {
+            const stream = fs.createReadStream(cachePath);
+            res.setHeader('Content-Type', 'image/webp');
+            stream.pipe(res);
+            stream.on('end', resolve);
+            stream.on('error', reject);
+          } else {
+            reject(new Error('Cache file not found after conversion'));
+          }
+        }
+      }, 100); // 100ms間隔でチェック
+    });
+  }
+  
+  // in-flight管理に追加
+  inFlightConversions.set(cacheKey, { startTime: Date.now(), displayPath });
+  
+  try {
+    // 並列制限を適用して変換実行
+    const result = await conversionLimit(() => 
+      convertAndRespond(params)
+    );
+    
+    // in-flight管理から削除
+    inFlightConversions.delete(cacheKey);
+    
+    return result;
+  } catch (error) {
+    // エラー時もin-flight管理から削除
+    inFlightConversions.delete(cacheKey);
+    throw error;
+  }
+}
 
 /**
  * 画像変換・レスポンス送信関数
@@ -78,8 +143,8 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * Photo_Size が指定されている場合のみリサイズを実行
        *
        * 技術的詳細:
-       * - 軽量版: 幅基準の単純リサイズ（処理速度優先）
-       * - 通常版: 縦横比較による最適リサイズ（見た目優先）
+       * - 高速処理モード: 幅基準の単純リサイズ（処理速度優先）
+       * - バランス/高品質モード: 縦横比較による最適リサイズ（見た目優先）
        * - withoutEnlargement: 元画像より大きくしない制限
        * - メタデータ取得: 画像サイズ情報の動的取得
        */
@@ -817,6 +882,33 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
   });
 }
 
+/**
+ * in-flight状況の監視とクリーンアップ
+ * 長時間残っている変換処理を検出・クリーンアップ
+ */
+function startInFlightMonitoring() {
+  setInterval(() => {
+    const now = Date.now();
+    const timeout = 30000; // 30秒でタイムアウト
+    
+    for (const [cacheKey, info] of inFlightConversions.entries()) {
+      if (now - info.startTime > timeout) {
+        logger.warn(`[in-flightタイムアウト] 長時間残っている変換をクリーンアップ: ${info.displayPath}`);
+        inFlightConversions.delete(cacheKey);
+      }
+    }
+    
+    // 定期的にin-flight状況をログ出力
+    if (inFlightConversions.size > 0) {
+      logger.info(`[in-flight状況] 進行中の変換: ${inFlightConversions.size}/${maxConcurrency}`);
+    }
+  }, 10000); // 10秒間隔でチェック
+}
+
+// in-flight監視を開始
+startInFlightMonitoring();
+
 module.exports = {
-  convertAndRespond
+  convertAndRespond,
+  convertAndRespondWithLimit
 };

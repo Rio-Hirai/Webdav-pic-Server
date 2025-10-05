@@ -5,9 +5,17 @@
 COMPRESSION_ENABLED=true
 COMPRESSION_THRESHOLD=0.3
 
-# 画像変換設定（デフォルト値）
-DEFAULT_QUALITY=30
+# サーバー設定
+PORT=1900
+ROOT_PATH=Z:/書籍
+MAX_LIST=1280
+
+# 画像変換設定
 PHOTO_SIZE=640
+DEFAULT_QUALITY=30
+
+# 画像処理モード: 1=高速処理(effort=0,smartSubsample=false,回転補正なし), 2=バランス(effort=1,smartSubsample=true,回転補正あり), 3=高品質(effort=1,smartSubsample=true,回転補正あり,最適リサイズ)
+IMAGE_MODE=2
 
 # キャッシュ設定（ミリ秒）- Ryzen 3950X・64GB最適化
 CACHE_TTL_MS=600000
@@ -31,9 +39,6 @@ EMERGENCY_DISABLE_RATE_LIMIT=false
 # スタック処理では複雑な過負荷対策は不要（LIFO方式で最新リクエストが最優先）
 STACK_MAX_SIZE=200
 STACK_PROCESSING_DELAY_MS=5
-
-# サーバー設定
-MAX_LIST=1280
 
 # 再起動設定
 RESTART_ENABLED=false

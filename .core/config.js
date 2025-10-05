@@ -57,8 +57,8 @@ let lastConfigValues = {};
  */
 function validateConfigValue(key, value, defaultValue) {
   // 数値型の設定検証
-  if (key.includes('SIZE') || key.includes('LIST') || key.includes('MS') || key.includes('QUALITY') || 
-      key.includes('CONCURRENCY') || key.includes('MEMORY') || key.includes('PIXEL') || key.includes('REQUESTS') || 
+  if (key.includes('SIZE') || key.includes('LIST') || key.includes('MS') || key.includes('QUALITY') ||
+      key.includes('CONCURRENCY') || key.includes('MEMORY') || key.includes('PIXEL') || key.includes('REQUESTS') ||
       key.includes('WINDOW') || key.includes('QUEUE') || key.includes('TIMEOUT') || key.includes('ACTIVE') ||
       key.includes('THRESHOLD')) {
 
@@ -193,7 +193,7 @@ function validateConfigValue(key, value, defaultValue) {
     }
     return value.trim();
   }
-  
+
   return value;
 }
 
@@ -228,7 +228,7 @@ function loadConfig() {
       const lines = configContent.split('\n');
       let updatedCount = 0;
       const currentConfigValues = {};
-      
+
       // 現在の設定値を読み込み
       for (const line of lines) {
         const trimmed = line.trim();
@@ -241,7 +241,7 @@ function loadConfig() {
           }
         }
       }
-      
+
       // 前回の設定値と比較して差分を検出
       for (const [key, value] of Object.entries(currentConfigValues)) {
             // 値が変更された場合のみ更新
@@ -251,7 +251,7 @@ function loadConfig() {
               if (lastConfigValues[key] !== undefined) {
                 // 既存設定の変更
                 logger.info(`[設定変更] ${key}: ${lastConfigValues[key]} → ${value}`);
-                
+
             // 重要な設定変更の場合は追加情報を出力
             if (key === 'DEFAULT_QUALITY') {
               logger.info(`[品質設定更新] 画像変換のデフォルト品質が ${value}% に変更されました`);
@@ -309,7 +309,7 @@ function loadConfig() {
               updatedCount++;
             }
       }
-      
+
       // 削除された設定を検出
       for (const [key, value] of Object.entries(lastConfigValues)) {
         if (currentConfigValues[key] === undefined) {
@@ -317,18 +317,18 @@ function loadConfig() {
           updatedCount++;
         }
       }
-      
+
       // 前回の設定値を更新
       lastConfigValues = { ...currentConfigValues };
-      
+
       // 変更があった場合のみサマリーログを出力
       if (updatedCount > 0) {
         logger.info(`[設定監視] ${updatedCount}個の設定を更新しました`);
 
         // Sharp関連の設定が変更された場合はSharpの設定を再適用
         const sharpRelatedKeys = ['MAX_CONCURRENCY', 'SHARP_MEMORY_LIMIT', 'SHARP_PIXEL_LIMIT'];
-        const hasSharpChanges = Object.keys(currentConfigValues).some(key => 
-          sharpRelatedKeys.includes(key) && 
+        const hasSharpChanges = Object.keys(currentConfigValues).some(key =>
+          sharpRelatedKeys.includes(key) &&
           lastConfigValues[key] !== currentConfigValues[key]
         );
         if (hasSharpChanges) {
@@ -345,7 +345,7 @@ function loadConfig() {
   } catch (error) {
     logger.warn(`[設定読み込みエラー] ${error.message}`);
   }
-  
+
   return { sharpConfigChanged: false };
 }
 
@@ -390,10 +390,17 @@ const getAggressiveDropEnabled = () => getDynamicConfig('AGGRESSIVE_DROP_ENABLED
 const getAggressiveDropThreshold = () => getDynamicConfig('AGGRESSIVE_DROP_THRESHOLD', 20); // 破棄閾値（リクエスト数）
 const getAggressiveDropWindow = () => getDynamicConfig('AGGRESSIVE_DROP_WINDOW_MS', 3000); // 時間窓（ミリ秒）
 
-// 緊急リセット設定読み込み関数
-const getEmergencyResetEnabled = () => getDynamicConfig('EMERGENCY_RESET_ENABLED', true); // 緊急リセット有効
-const getEmergencyResetThreshold = () => getDynamicConfig('EMERGENCY_RESET_THRESHOLD', 15); // リセット閾値（リクエスト数）
-const getEmergencyResetWindow = () => getDynamicConfig('EMERGENCY_RESET_WINDOW_MS', 3000); // 時間窓（ミリ秒）
+  // 緊急リセット設定読み込み関数
+  const getEmergencyResetEnabled = () => getDynamicConfig('EMERGENCY_RESET_ENABLED', true); // 緊急リセット有効
+  const getEmergencyResetThreshold = () => getDynamicConfig('EMERGENCY_RESET_THRESHOLD', 15); // リセット閾値（リクエスト数）
+  const getEmergencyResetWindow = () => getDynamicConfig('EMERGENCY_RESET_WINDOW_MS', 3000); // 時間窓（ミリ秒）
+
+  // サーバー設定読み込み関数
+  const getServerPort = () => getDynamicConfig('PORT', 1901); // サーバーポート
+  const getServerRootPath = () => getDynamicConfig('ROOT_PATH', 'Z:/書籍'); // サーバールートパス
+  
+  // 画像処理モード設定読み込み関数
+  const getImageMode = () => getDynamicConfig('IMAGE_MODE', 2); // 画像処理モード（1=高速処理、2=バランス処理、3=高品質処理）
 
 module.exports = {
   logger,
@@ -419,5 +426,8 @@ module.exports = {
   getAggressiveDropWindow,
   getEmergencyResetEnabled,
   getEmergencyResetThreshold,
-  getEmergencyResetWindow
+  getEmergencyResetWindow,
+  getServerPort,
+  getServerRootPath,
+  getImageMode
 };

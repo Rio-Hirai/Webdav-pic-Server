@@ -66,29 +66,169 @@ const CONFIG_WATCH_INTERVAL = 10000; // 10秒間隔で設定ファイルを監�
 let lastConfigValues = {};
 
 /**
+ * 設定値の検証関数
+ * 各パラメータの入力規則をチェックし、不正な値の場合は既存値またはデフォルト値で代用
+ */
+function validateConfigValue(key, value, defaultValue) {
+  // 数値型の設定検証
+  if (key.includes('SIZE') || key.includes('LIST') || key.includes('MS') || key.includes('QUALITY') || 
+      key.includes('CONCURRENCY') || key.includes('MEMORY') || key.includes('PIXEL') || key.includes('REQUESTS') || 
+      key.includes('WINDOW') || key.includes('QUEUE') || key.includes('TIMEOUT') || key.includes('ACTIVE') ||
+      key.includes('THRESHOLD')) {
+
+    const numValue = parseInt(value);
+
+    // 基本的な数値チェック
+    if (isNaN(numValue) || numValue < 0) {
+      logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (数値が無効)`);
+      return defaultValue;
+    }
+
+    // 具体的な範囲チェック
+    switch (key) {
+      case 'DEFAULT_QUALITY':
+        if (numValue < 10 || numValue > 100) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (品質は10-100の範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'PHOTO_SIZE':
+        if (numValue < 100 || numValue > 8192) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (サイズは100-8192の範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'MAX_CONCURRENCY':
+        if (numValue < 1 || numValue > 32) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (並列数は1-32の範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'SHARP_MEMORY_LIMIT':
+        if (numValue < 16 || numValue > 4096) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (メモリ制限は16-4096MBの範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'SHARP_PIXEL_LIMIT':
+        if (numValue < 1000000 || numValue > 1000000000) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (ピクセル制限は1M-1000Mの範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'CACHE_TTL_MS':
+        if (numValue < 60000 || numValue > 86400000) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (キャッシュTTLは1分-24時間の範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'CACHE_MIN_SIZE':
+        if (numValue < 1024 || numValue > 104857600) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (最小サイズは1KB-100MBの範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'RATE_LIMIT_REQUESTS':
+        if (numValue < 1 || numValue > 1000) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (リクエスト制限は1-1000の範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'RATE_LIMIT_WINDOW_MS':
+        if (numValue < 1000 || numValue > 300000) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (時間窓は1秒-5分の範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'RATE_LIMIT_QUEUE_SIZE':
+        if (numValue < 10 || numValue > 1000) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (キューサイズは10-1000の範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'STACK_MAX_SIZE':
+        if (numValue < 50 || numValue > 500) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (スタックサイズは50-500の範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'STACK_PROCESSING_DELAY_MS':
+        if (numValue < 1 || numValue > 100) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (処理遅延は1-100msの範囲)`);
+          return defaultValue;
+        }
+        break;
+      case 'MAX_LIST':
+        if (numValue < 10 || numValue > 10000) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (リスト制限は10-10000の範囲)`);
+          return defaultValue;
+        }
+        break;
+    }
+
+    return numValue;
+  }
+
+  // 真偽値型の設定検証
+  if (key.includes('ENABLED')) {
+    const lowerValue = value.toLowerCase();
+    if (lowerValue !== 'true' && lowerValue !== 'false') {
+      logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (真偽値はtrue/false)`);
+      return defaultValue;
+    }
+    return lowerValue === 'true';
+  }
+
+  // 浮動小数点型の設定検証
+  if (key.includes('THRESHOLD')) {
+    const floatValue = parseFloat(value);
+    if (isNaN(floatValue) || floatValue < 0 || floatValue > 1) {
+      logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (閾値は0.0-1.0の範囲)`);
+      return defaultValue;
+    }
+    return floatValue;
+  }
+
+  // 時刻形式の設定検証
+  if (key === 'RESTART_TIME') {
+    const timePattern = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
+    if (!timePattern.test(value)) {
+      logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (時刻形式はHH:MM)`);
+      return defaultValue;
+    }
+    return value;
+  }
+
+  // パス形式の設定検証
+  if (key === 'MAGICK_PATH') {
+    if (typeof value !== 'string' || value.trim() === '') {
+      logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (パスが無効)`);
+      return defaultValue;
+    }
+    return value.trim();
+  }
+
+  return value;
+}
+
+/**
  * 動的設定読み込み関数
  * config.txtから設定を読み込み、環境変数を動的に更新
  */
 function getDynamicConfig(key, defaultValue) {
   const value = process.env[key];
   if (value === undefined) return defaultValue;
-  
-  // 数値型の設定を適切に変換
-  if (key.includes('SIZE') || key.includes('LIST') || key.includes('MS') || key.includes('QUALITY')) {
-    return parseInt(value) || defaultValue;
+
+  // 設定値の検証を実行
+  const validatedValue = validateConfigValue(key, value, defaultValue);
+
+  // デバッグ用ログ（型変換の確認）- 初回のみ出力
+  if (key === 'SHARP_PIXEL_LIMIT' && !global.sharpPixelLimitLogged) {
+    logger.info(`[設定デバッグ] ${key}: "${value}" (型: ${typeof value}) → ${validatedValue} (型: ${typeof validatedValue})`);
+    global.sharpPixelLimitLogged = true;
   }
-  
-  // 真偽値型の設定を適切に変換
-  if (key.includes('ENABLED')) {
-    return value === 'true';
-  }
-  
-  // 浮動小数点型の設定を適切に変換
-  if (key.includes('THRESHOLD')) {
-    return parseFloat(value) || defaultValue;
-  }
-  
-  return value;
+
+  return validatedValue;
 }
 
 /**
@@ -102,7 +242,7 @@ function loadConfig() {
       const lines = configContent.split('\n');
       let updatedCount = 0;
       const currentConfigValues = {};
-      
+
       // 現在の設定値を読み込み
       for (const line of lines) {
         const trimmed = line.trim();
@@ -115,16 +255,17 @@ function loadConfig() {
           }
         }
       }
-      
+
       // 前回の設定値と比較して差分を検出
       for (const [key, value] of Object.entries(currentConfigValues)) {
             // 値が変更された場合のみ更新
             if (lastConfigValues[key] !== value) {
+              // 環境変数には文字列として保存（getDynamicConfigで適切に型変換）
               process.env[key] = value;
               if (lastConfigValues[key] !== undefined) {
                 // 既存設定の変更
                 logger.info(`[設定変更] ${key}: ${lastConfigValues[key]} → ${value}`);
-                
+
             // 重要な設定変更の場合は追加情報を出力
             if (key === 'DEFAULT_QUALITY') {
               logger.info(`[品質設定更新] 画像変換のデフォルト品質が ${value}% に変更されました`);
@@ -140,6 +281,40 @@ function loadConfig() {
               logger.info(`[キャッシュ設定更新] キャッシュ有効期間が ${Math.floor(parseInt(value) / 1000)}秒 に変更されました`);
             } else if (key === 'CACHE_MIN_SIZE') {
               logger.info(`[キャッシュ設定更新] キャッシュ最小サイズが ${Math.floor(parseInt(value) / 1024)}KB に変更されました`);
+            } else if (key === 'MAX_CONCURRENCY') {
+              logger.info(`[並列処理設定更新] 最大並列数が ${value} に変更されました`);
+            } else if (key === 'SHARP_MEMORY_LIMIT') {
+              logger.info(`[Sharp設定更新] メモリキャッシュ制限が ${value}MB に変更されました`);
+            } else if (key === 'SHARP_PIXEL_LIMIT') {
+              logger.info(`[Sharp設定更新] ピクセル制限が ${parseInt(value).toLocaleString()} に変更されました`);
+            } else if (key === 'RATE_LIMIT_ENABLED') {
+              logger.info(`[レート制限設定更新] レート制限が ${value === 'true' ? '有効' : '無効'} に変更されました`);
+            } else if (key === 'RATE_LIMIT_REQUESTS') {
+              logger.info(`[レート制限設定更新] 1分間あたりのリクエスト数が ${value} に変更されました`);
+            } else if (key === 'RATE_LIMIT_WINDOW_MS') {
+              logger.info(`[レート制限設定更新] 時間窓が ${value}ms に変更されました`);
+            } else if (key === 'RATE_LIMIT_QUEUE_SIZE') {
+              logger.info(`[レート制限設定更新] キューサイズ制限が ${value} に変更されました`);
+            } else if (key === 'EMERGENCY_DISABLE_RATE_LIMIT') {
+              logger.warn(`[緊急時設定更新] レート制限が ${value === 'true' ? '無効化' : '有効'} に変更されました`);
+            } else if (key === 'MAX_ACTIVE_REQUESTS') {
+              logger.info(`[過負荷対策設定更新] 最大同時リクエスト数が ${value} に変更されました`);
+            } else if (key === 'REQUEST_TIMEOUT_MS') {
+              logger.info(`[過負荷対策設定更新] リクエストタイムアウトが ${value}ms に変更されました`);
+            } else if (key === 'DROP_REQUESTS_WHEN_OVERLOADED') {
+              logger.warn(`[過負荷対策設定更新] 過負荷時のリクエスト破棄が ${value === 'true' ? '有効' : '無効'} に変更されました`);
+            } else if (key === 'AGGRESSIVE_DROP_ENABLED') {
+              logger.warn(`[積極的破棄設定更新] 積極的破棄が ${value === 'true' ? '有効' : '無効'} に変更されました`);
+            } else if (key === 'AGGRESSIVE_DROP_THRESHOLD') {
+              logger.info(`[積極的破棄設定更新] 破棄閾値が ${value} リクエストに変更されました`);
+            } else if (key === 'AGGRESSIVE_DROP_WINDOW_MS') {
+              logger.info(`[積極的破棄設定更新] 時間窓が ${value}ms に変更されました`);
+            } else if (key === 'EMERGENCY_RESET_ENABLED') {
+              logger.warn(`[緊急リセット設定更新] 緊急リセットが ${value === 'true' ? '有効' : '無効'} に変更されました`);
+            } else if (key === 'EMERGENCY_RESET_THRESHOLD') {
+              logger.info(`[緊急リセット設定更新] リセット閾値が ${value} リクエストに変更されました`);
+            } else if (key === 'EMERGENCY_RESET_WINDOW_MS') {
+              logger.info(`[緊急リセット設定更新] リセット時間窓が ${value}ms に変更されました`);
             }
               } else {
                 // 新規設定の追加
@@ -148,7 +323,7 @@ function loadConfig() {
               updatedCount++;
             }
       }
-      
+
       // 削除された設定を検出
       for (const [key, value] of Object.entries(lastConfigValues)) {
         if (currentConfigValues[key] === undefined) {
@@ -156,13 +331,23 @@ function loadConfig() {
           updatedCount++;
         }
       }
-      
+
       // 前回の設定値を更新
       lastConfigValues = { ...currentConfigValues };
-      
+
       // 変更があった場合のみサマリーログを出力
       if (updatedCount > 0) {
         logger.info(`[設定監視] ${updatedCount}個の設定を更新しました`);
+
+        // Sharp関連の設定が変更された場合はSharpの設定を再適用
+        const sharpRelatedKeys = ['MAX_CONCURRENCY', 'SHARP_MEMORY_LIMIT', 'SHARP_PIXEL_LIMIT'];
+        const hasSharpChanges = Object.keys(currentConfigValues).some(key => 
+          sharpRelatedKeys.includes(key) && 
+          lastConfigValues[key] !== currentConfigValues[key]
+        );
+        if (hasSharpChanges) {
+          configureSharp();
+        }
       }
     } else {
       // ファイルが見つからない場合のみ警告（初回以外は抑制）
@@ -203,18 +388,7 @@ function getCompressionThreshold() {
  * - ファイルキャッシュにより、ディスクI/Oの最適化
  * - アイテムキャッシュにより、メタデータ取得の高速化
  */
-try {
-  const cpuCount = Math.max(1, os.cpus().length - 1); // 最低1、最大はCPU数-1
-  sharp.concurrency(cpuCount); // 並列処理数の制限
-  sharp.cache({
-    memory: 1024, // メモリキャッシュサイズ（MB）- 64GB環境向けに大幅増量
-    files: 500, // ファイルキャッシュ数 - 高性能環境向けに増量
-    items: 1000, // アイテムキャッシュ数 - 高性能環境向けに増量
-  });
-  logger.info(`sharp configured: concurrency=${cpuCount}`);
-} catch (e) {
-  logger.warn("failed to configure sharp performance settings", e);
-}
+// Sharpの初期設定は動的設定読み込み後に実行（関数定義は後で行う）
 
 /**
  * ストリーム処理ユーティリティ
@@ -239,12 +413,346 @@ const pipeline = promisify(stream.pipeline);
  * - TTL管理: 期限切れファイルの自動削除によるディスク容量管理
  * - サイズフィルタ: 小ファイルはキャッシュ対象外（オーバーヘッド回避）
  */
-const CACHE_DIR = "Y:/caches/webdav/tmp"; // キャッシュファイル保存ディレクトリ
+// キャッシュディレクトリの設定（権限問題対応）
+let CACHE_DIR = "Y:/caches/webdav/tmp"; // キャッシュファイル保存ディレクトリ
+const FALLBACK_CACHE_DIR = path.join(__dirname, "cache"); // 代替キャッシュディレクトリ
 const CLEANUP_INTERVAL_MS = 30 * 60 * 1000; // 30分 - キャッシュクリーニング実行間隔
 
 // 動的キャッシュ設定読み込み関数
 const getCacheMinSize = () => getDynamicConfig('CACHE_MIN_SIZE', 1 * 1024 * 1024); // 1MB - キャッシュ対象の最小ファイルサイズ
 const getCacheTTL = () => getDynamicConfig('CACHE_TTL_MS', 5 * 60 * 1000); // 5分 - キャッシュファイルの有効期間
+
+  // メモリ管理設定読み込み関数
+  const getMaxConcurrency = () => getDynamicConfig('MAX_CONCURRENCY', 2); // 最大並列処理数（大量アクセス対策）
+  const getSharpMemoryLimit = () => getDynamicConfig('SHARP_MEMORY_LIMIT', 64); // Sharpメモリキャッシュ制限（MB）
+  const getSharpPixelLimit = () => getDynamicConfig('SHARP_PIXEL_LIMIT', 10000000); // Sharpピクセル制限
+
+  // レート制限設定読み込み関数
+  const getRateLimitEnabled = () => {
+    const emergencyDisable = getDynamicConfig('EMERGENCY_DISABLE_RATE_LIMIT', false);
+    if (emergencyDisable) return false; // 緊急時は無効化
+    return getDynamicConfig('RATE_LIMIT_ENABLED', true);
+  };
+  const getRateLimitRequests = () => getDynamicConfig('RATE_LIMIT_REQUESTS', 50); // 1分間あたりのリクエスト数
+  const getRateLimitWindow = () => getDynamicConfig('RATE_LIMIT_WINDOW_MS', 60000); // 時間窓（ミリ秒）
+  const getRateLimitQueueSize = () => getDynamicConfig('RATE_LIMIT_QUEUE_SIZE', 100); // キューサイズ制限
+
+  // 過負荷対策設定読み込み関数
+  const getMaxActiveRequests = () => getDynamicConfig('MAX_ACTIVE_REQUESTS', 10); // 最大同時リクエスト数
+  const getRequestTimeout = () => getDynamicConfig('REQUEST_TIMEOUT_MS', 5000); // リクエストタイムアウト（ミリ秒）
+  const getDropRequestsWhenOverloaded = () => getDynamicConfig('DROP_REQUESTS_WHEN_OVERLOADED', true); // 過負荷時のリクエスト破棄
+
+  // 積極的破棄設定読み込み関数
+  const getAggressiveDropEnabled = () => getDynamicConfig('AGGRESSIVE_DROP_ENABLED', true); // 積極的破棄有効
+  const getAggressiveDropThreshold = () => getDynamicConfig('AGGRESSIVE_DROP_THRESHOLD', 20); // 破棄閾値（リクエスト数）
+  const getAggressiveDropWindow = () => getDynamicConfig('AGGRESSIVE_DROP_WINDOW_MS', 3000); // 時間窓（ミリ秒）
+
+  // 緊急リセット設定読み込み関数
+  const getEmergencyResetEnabled = () => getDynamicConfig('EMERGENCY_RESET_ENABLED', true); // 緊急リセット有効
+  const getEmergencyResetThreshold = () => getDynamicConfig('EMERGENCY_RESET_THRESHOLD', 15); // リセット閾値（リクエスト数）
+  const getEmergencyResetWindow = () => getDynamicConfig('EMERGENCY_RESET_WINDOW_MS', 3000); // 時間窓（ミリ秒）
+
+// Sharpの初期設定関数（動的設定関数の定義後に配置）
+function configureSharp() {
+  try {
+    const cpuCount = Math.max(1, os.cpus().length - 1); // 最低1、最大はCPU数-1
+    const maxConcurrency = getMaxConcurrency(); // 動的設定から取得
+    const memoryLimit = getSharpMemoryLimit(); // 動的設定から取得
+
+    // 動的設定を反映
+    sharp.concurrency(maxConcurrency);
+    sharp.cache({
+      memory: memoryLimit, // 動的設定のメモリキャッシュサイズ（MB）
+      files: 100, // ファイルキャッシュ数
+      items: 200, // アイテムキャッシュ数
+    });
+    logger.info(`sharp configured: concurrency=${maxConcurrency}, memory=${memoryLimit}MB`);
+  } catch (e) {
+    logger.warn("failed to configure sharp performance settings", e);
+  }
+}
+
+// Sharpの初期設定を実行
+configureSharp();
+
+  /**
+   * リクエストスタッククラス
+   * LIFO（Last In, First Out）方式でリクエストを処理
+   * 最新のリクエスト（ユーザーが現在見ようとしている画像）を最優先で処理
+   */
+  class RequestStack {
+    constructor() {
+      this.stack = []; // リクエストスタック
+      this.processing = false; // 処理中フラグ
+      this.maxStackSize = 100; // スタックの最大サイズ
+      this.processedCount = 0; // 処理済みリクエスト数
+      this.lastProcessTime = Date.now(); // 最後の処理時刻
+      this.stuckCheckInterval = null; // スタック監視のインターバル
+      this.currentFolder = null; // 現在のフォルダパス
+      this.folderChangeCount = 0; // フォルダ変更回数
+
+      // スタック監視を開始（5秒間隔でチェック）
+      this.startStuckMonitoring();
+    }
+
+  // リクエストをスタックに追加
+  push(requestInfo) {
+    // フォルダ変更検出
+    const requestFolder = this.extractFolderFromPath(requestInfo.displayPath);
+    if (this.currentFolder !== null && this.currentFolder !== requestFolder) {
+      // フォルダが変更された場合はスタックをクリア
+      this.clearStackForFolderChange(requestFolder);
+    }
+    this.currentFolder = requestFolder;
+
+    // 積極的なスタックサイズ制限（50個で警告、80個で積極的破棄）
+    if (this.stack.length >= 80) {
+      // 80個以上の場合、古いリクエストを50%破棄
+      const removeCount = Math.floor(this.stack.length * 0.5);
+      for (let i = 0; i < removeCount; i++) {
+        const removed = this.stack.shift();
+        if (removed && removed.res && !removed.res.headersSent) {
+          removed.res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+          removed.res.end('Request stack overflow. Please retry.');
+        }
+      }
+      logger.warn(`[スタック積極的破棄] ${removeCount}件の古いリクエストを破棄 (残り: ${this.stack.length})`);
+    } else if (this.stack.length >= 50) {
+      // 50個以上の場合、古いリクエストを25%破棄
+      const removeCount = Math.floor(this.stack.length * 0.25);
+      for (let i = 0; i < removeCount; i++) {
+        const removed = this.stack.shift();
+        if (removed && removed.res && !removed.res.headersSent) {
+          removed.res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+          removed.res.end('Request stack overflow. Please retry.');
+        }
+      }
+      logger.warn(`[スタック部分破棄] ${removeCount}件の古いリクエストを破棄 (残り: ${this.stack.length})`);
+    } else if (this.stack.length >= this.maxStackSize) {
+      // 最大サイズの場合、古いリクエストを1件削除
+      const removed = this.stack.shift();
+      if (removed && removed.res && !removed.res.headersSent) {
+        removed.res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+        removed.res.end('Request stack overflow. Please retry.');
+      }
+      logger.warn(`[スタックオーバーフロー] 古いリクエストを破棄: ${removed?.displayPath || 'unknown'}`);
+    }
+
+    // 新しいリクエストをスタックの最後に追加（LIFOのため最後が最優先）
+    this.stack.push(requestInfo);
+    logger.info(`[スタック追加] ${requestInfo.displayPath} (スタックサイズ: ${this.stack.length})`);
+
+    // 処理を開始
+    this.processNext();
+  }
+
+    // 次のリクエストを処理
+    async processNext() {
+      if (this.processing || this.stack.length === 0) {
+        return; // 既に処理中またはスタックが空の場合は何もしない
+      }
+
+      this.processing = true;
+      const requestInfo = this.stack.pop(); // スタックの最後から取得（最新のリクエスト）
+
+      // タイムアウト設定（8秒でタイムアウト）
+      const timeoutId = setTimeout(() => {
+        logger.warn(`[スタック処理タイムアウト] ${requestInfo.displayPath} - 8秒でタイムアウト`);
+        if (requestInfo.res && !requestInfo.res.headersSent) {
+          requestInfo.res.writeHead(408, { 'Content-Type': 'text/plain; charset=utf-8' });
+          requestInfo.res.end('Request timeout');
+        }
+        this.processing = false;
+        // 次のリクエストを処理
+        setTimeout(() => this.processNext(), 5);
+      }, 8000);
+
+      try {
+        logger.info(`[スタック処理開始] ${requestInfo.displayPath} (残り: ${this.stack.length})`);
+
+        // 最後の処理時刻を更新
+        this.lastProcessTime = Date.now();
+
+        // リクエスト処理を実行（タイムアウト付き）
+        await Promise.race([
+          requestInfo.processor(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Processor timeout')), 6000))
+        ]);
+
+        clearTimeout(timeoutId);
+        this.processedCount++;
+        this.lastProcessTime = Date.now(); // 完了時刻も更新
+        logger.info(`[スタック処理完了] ${requestInfo.displayPath} (処理済み: ${this.processedCount})`);
+
+      } catch (error) {
+        clearTimeout(timeoutId);
+        logger.error(`[スタック処理エラー] ${requestInfo.displayPath}: ${error.message}`);
+
+        // エラー時は適切なレスポンスを送信
+        if (requestInfo.res && !requestInfo.res.headersSent) {
+          requestInfo.res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+          requestInfo.res.end('Internal server error');
+        }
+      } finally {
+        this.processing = false;
+
+        // スタックに残りのリクエストがあれば次の処理を開始
+        if (this.stack.length > 0) {
+          // 次の処理を少し遅延させてCPU負荷を軽減
+          setTimeout(() => this.processNext(), 5);
+        }
+      }
+    }
+
+  // スタック監視を開始
+  startStuckMonitoring() {
+    this.stuckCheckInterval = setInterval(() => {
+      const now = Date.now();
+      const timeSinceLastProcess = now - this.lastProcessTime;
+
+      // 処理中で5秒以上経過している場合は強制復旧（より積極的）
+      if (this.processing && timeSinceLastProcess > 5000) {
+        logger.warn(`[スタック強制復旧] 処理が5秒以上停止しています - 強制復旧を実行`);
+        this.forceRecovery();
+      }
+
+      // スタックが30個以上溜まっている場合は警告
+      if (this.stack.length > 30) {
+        logger.warn(`[スタック警告] スタックが${this.stack.length}個に達しています`);
+      }
+
+      // スタックが60個以上溜まっている場合は積極的破棄
+      if (this.stack.length > 60) {
+        const removeCount = Math.floor(this.stack.length * 0.3); // 30%破棄
+        for (let i = 0; i < removeCount; i++) {
+          const removed = this.stack.shift();
+          if (removed && removed.res && !removed.res.headersSent) {
+            removed.res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+            removed.res.end('Request stack emergency clear. Please retry.');
+          }
+        }
+        logger.warn(`[スタック緊急破棄] ${removeCount}件のリクエストを破棄 (残り: ${this.stack.length})`);
+        this.forceRecovery();
+      }
+
+      // スタックが100個以上溜まっている場合は強制復旧
+      if (this.stack.length > 100) {
+        logger.warn(`[スタック緊急復旧] スタックが${this.stack.length}個に達しています - 緊急復旧を実行`);
+        this.forceRecovery();
+      }
+    }, 3000); // 3秒間隔でチェック（より頻繁に監視）
+  }
+
+    // 強制復旧処理
+    forceRecovery() {
+      logger.error(`[スタック強制復旧実行] 処理中フラグをリセット`);
+      this.processing = false;
+      this.lastProcessTime = Date.now();
+
+      // 次のリクエストを処理
+      setTimeout(() => this.processNext(), 100);
+    }
+
+    // スタックの状態を取得
+    getStatus() {
+      return {
+        stackSize: this.stack.length,
+        processing: this.processing,
+        processedCount: this.processedCount,
+        maxStackSize: this.maxStackSize,
+        timeSinceLastProcess: Date.now() - this.lastProcessTime,
+        currentFolder: this.currentFolder,
+        folderChangeCount: this.folderChangeCount
+      };
+    }
+
+    // パスからフォルダを抽出
+    extractFolderFromPath(displayPath) {
+      // パスからフォルダ部分を抽出
+      const pathParts = displayPath.split('/');
+      if (pathParts.length <= 2) {
+        return displayPath; // ルートレベルの場合
+      }
+      // 最後の要素（ファイル名）を除いた部分をフォルダパスとする
+      return pathParts.slice(0, -1).join('/');
+    }
+
+    // フォルダ変更時のスタッククリア
+    clearStackForFolderChange(newFolder) {
+      this.folderChangeCount++;
+      const clearedCount = this.stack.length;
+
+      // スタック内のすべてのリクエストにエラーレスポンスを送信
+      this.stack.forEach(requestInfo => {
+        if (requestInfo.res && !requestInfo.res.headersSent) {
+          requestInfo.res.writeHead(410, { 
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Cache-Control': 'no-cache'
+          });
+          requestInfo.res.end('Request cancelled due to folder change');
+        }
+      });
+
+      // スタックをクリア
+      this.stack = [];
+
+      // 処理中フラグをリセット
+      this.processing = false;
+
+      logger.info(`[フォルダ変更検出] "${this.currentFolder}" → "${newFolder}" - ${clearedCount}件のリクエストを破棄 (変更回数: ${this.folderChangeCount})`);
+    }
+
+    // スタック監視を停止
+    stopMonitoring() {
+      if (this.stuckCheckInterval) {
+        clearInterval(this.stuckCheckInterval);
+        this.stuckCheckInterval = null;
+      }
+    }
+  }
+
+  const requestStack = new RequestStack();
+
+  /**
+   * シンプルなサーバー監視クラス
+   * スタック処理システム用の軽量な監視機能
+   */
+  class SimpleServerMonitor {
+    constructor() {
+      this.requestCount = 0;
+      this.lastLogTime = Date.now();
+    }
+
+    // リクエスト開始（スタック処理では単純にカウントのみ）
+    startRequest() {
+      this.requestCount++;
+      return `request-${this.requestCount}`;
+    }
+
+    // リクエスト終了（スタック処理では単純にカウントのみ）
+    endRequest() {
+      // 定期的にスタック状況をログ
+      const now = Date.now();
+      if (now - this.lastLogTime > 30000) { // 30秒ごと
+        const stackStatus = requestStack.getStatus();
+        logger.info(`[サーバー状況] 総リクエスト: ${this.requestCount}, スタック: ${stackStatus.stackSize}/${stackStatus.maxStackSize}, 処理中: ${stackStatus.processing}, フォルダ: ${stackStatus.currentFolder || 'none'}, 変更回数: ${stackStatus.folderChangeCount}`);
+        this.lastLogTime = now;
+      }
+    }
+
+    // 負荷状況取得
+    getLoadStatus() {
+      const stackStatus = requestStack.getStatus();
+      return {
+        totalRequests: this.requestCount,
+        stackSize: stackStatus.stackSize,
+        processing: stackStatus.processing,
+        processedCount: stackStatus.processedCount
+      };
+    }
+  }
+
+  const serverMonitor = new SimpleServerMonitor();
 
 /**
  * キャッシュディレクトリの完全リセット関数（同期版）
@@ -277,16 +785,55 @@ function resetCacheSync(dir) {
 }
 
 // キャッシュディレクトリ作成＆リセット（初回起動時）
-if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
-logger.info("=== キャッシュリセット中... ===");
-resetCacheSync(CACHE_DIR);
-logger.info("=== キャッシュリセット完了 ===");
+function initializeCacheDirectory() {
+  // まずメインキャッシュディレクトリを試行
+  try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      logger.info(`[キャッシュディレクトリ作成] ${CACHE_DIR}`);
+    }
+    // 書き込み権限テスト
+    const testFile = path.join(CACHE_DIR, "test_write_permission.tmp");
+    fs.writeFileSync(testFile, "test");
+    fs.unlinkSync(testFile);
+    logger.info(`[キャッシュディレクトリ権限確認] ${CACHE_DIR} - OK`);
+    return CACHE_DIR;
+  } catch (e) {
+    logger.error(`[キャッシュディレクトリ作成/権限エラー] ${CACHE_DIR}: ${e.message}`);
+
+    // 代替キャッシュディレクトリを使用
+    try {
+      if (!fs.existsSync(FALLBACK_CACHE_DIR)) {
+        fs.mkdirSync(FALLBACK_CACHE_DIR, { recursive: true });
+        logger.info(`[代替キャッシュディレクトリ作成] ${FALLBACK_CACHE_DIR}`);
+      }
+      // 書き込み権限テスト
+      const testFile = path.join(FALLBACK_CACHE_DIR, "test_write_permission.tmp");
+      fs.writeFileSync(testFile, "test");
+      fs.unlinkSync(testFile);
+      logger.info(`[代替キャッシュディレクトリ権限確認] ${FALLBACK_CACHE_DIR} - OK`);
+      CACHE_DIR = FALLBACK_CACHE_DIR; // グローバル変数を更新
+      return FALLBACK_CACHE_DIR;
+    } catch (fallbackError) {
+      logger.error(`[代替キャッシュディレクトリも失敗] ${FALLBACK_CACHE_DIR}: ${fallbackError.message}`);
+      logger.warn("[キャッシュ機能を無効化] すべてのキャッシュディレクトリで書き込み権限なし");
+      return null; // キャッシュ無効化
+    }
+  }
+}
+
+const activeCacheDir = initializeCacheDirectory();
+if (activeCacheDir) {
+  logger.info("=== キャッシュリセット中... ===");
+  resetCacheSync(activeCacheDir);
+  logger.info("=== キャッシュリセット完了 ===");
+} else {
+  logger.warn("=== キャッシュ機能が無効化されました ===");
+}
 
 /**
- * キャッシュディレクトリの初期化と定期クリーニング設定
+ * キャッシュディレクトリの定期クリーニング設定
  */
-// キャッシュディレクトリが存在しない場合は作成（recursive: true で親ディレクトリも自動作成）
-if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
 /**
  * キャッシュファイルの定期クリーニング関数（非同期版）
@@ -328,17 +875,20 @@ async function cleanupCache(dir) {
   }
 }
 
-// 定期クリーニングの開始（30分間隔で実行）
-setInterval(() => cleanupCache(CACHE_DIR), CLEANUP_INTERVAL_MS);
+// 定期クリーニングの開始（30分間隔で実行）- キャッシュディレクトリが有効な場合のみ
+if (activeCacheDir) {
+  setInterval(() => cleanupCache(activeCacheDir), CLEANUP_INTERVAL_MS);
+  logger.info(`[定期クリーニング設定] ${activeCacheDir} を ${CLEANUP_INTERVAL_MS/1000}秒間隔で監視中`);
+}
 
 /**
  * 自動再起動機能
  * 特定時刻にプロセスを再起動してメモリリークやリソース問題を防止
- * 
+ *
  * 設定方法:
  * - 環境変数 RESTART_TIME: "03:00" (24時間形式、日本時間)
  * - 環境変数 RESTART_ENABLED: "true" (再起動機能の有効/無効)
- * 
+ *
  * 技術的詳細:
  * - 毎分チェック: 現在時刻が設定時刻と一致するかチェック
  * - グレースフルシャットダウン: 既存接続の完了を待ってから再起動
@@ -351,26 +901,26 @@ let restartScheduled = false; // 重複再起動防止フラグ
 
 if (RESTART_ENABLED) {
   logger.info(`[再起動機能] 有効 - 再起動時刻: ${RESTART_TIME} (JST)`);
-  
+
   // 毎分、再起動時刻をチェック
   setInterval(() => {
     const now = new Date();
     const jstTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     const currentTime = jstTime.toTimeString().slice(0, 5); // "HH:MM"形式
-    
+
     if (currentTime === RESTART_TIME && !restartScheduled) {
       restartScheduled = true;
       logger.info(`[再起動予告] 5分後に自動再起動を実行します (${currentTime})`);
-      
+
       // 5分後に再起動を実行
       setTimeout(() => {
         logger.info("[再起動実行] 自動再起動を開始します...");
-        
+
         // グレースフルシャットダウン: 既存の接続が完了するまで待機
         process.exit(0); // 正常終了（PM2等のプロセス管理ツールが自動再起動）
       }, 5 * 60 * 1000); // 5分 = 5 * 60 * 1000ms
     }
-    
+
     // 再起動時刻を過ぎたらフラグをリセット（翌日の再起動準備）
     if (currentTime !== RESTART_TIME) {
       restartScheduled = false;
@@ -433,7 +983,7 @@ serverConfigs.forEach((config) => startWebDAV(config));
 function startWebDAV(config) {
   // 設定の分割代入（動的設定読み込み対応）
   const { PORT, ROOT_PATH, label } = config;
-  
+
   // 動的設定読み込み関数
   const getPhotoSize = () => getDynamicConfig('PHOTO_SIZE', config.Photo_Size);
   const getMaxList = () => getDynamicConfig('MAX_LIST', config.MAX_LIST);
@@ -457,19 +1007,16 @@ function startWebDAV(config) {
    * - 分離設計: ディレクトリリストとファイル統計を独立管理
    */
   const dirCache = new LRUCache({
-    max: 200000, // 最大200,000エントリ（ディレクトリリスト）- 高性能環境向けに増量
+    max: 10000, // 最大10,000エントリ（ディレクトリリスト）- 大量画像フォルダでのメモリ不足を防ぐため削減
     ttl: DIR_TTL, // TTL: 1時間
   });
 
   const statCache = new LRUCache({
-    max: 1000000, // 最大1,000,000エントリ（ファイル統計情報）- 高性能環境向けに大幅増量
+    max: 50000, // 最大50,000エントリ（ファイル統計情報）- 大量画像フォルダでのメモリ不足を防ぐため大幅削減
     ttl: STAT_TTL, // TTL: 1時間
   });
 
-  // 並列処理制限: 高性能環境（Ryzen 3950X + 64GB）向けに最適化
-  // CPU数より多い並列処理を許可して高性能環境のリソースを最大活用
-  const cpuCount = os.cpus().length; // 32スレッド（3950X）
-  const limit = pLimit(Math.max(cpuCount * 2, 32)); // 64並列まで許可（高性能環境向け）
+  // スタック処理システムでは並列処理制限は不要（順次処理のため）
 
   /**
    * ファイルシステム関数のキャッシュラッパー作成
@@ -759,22 +1306,7 @@ function startWebDAV(config) {
       logger.warn("[warn] failed to install fs wrappers", e); // ラッパーインストール失敗は警告ログを出力
     }
 
-    /**
-     * 画像変換の重複排除とエラーハンドリング設定
-     * 同じ画像の同時変換要求を効率的に処理し、サーバー負荷を軽減
-     *
-     * 技術的詳細:
-     * - in-flight deduplication: 同一キーの変換要求を統合
-     * - タイムアウト制御: 無限待機を防ぐタイムアウト設定
-     * - 失敗バックオフ: 連続失敗時の再試行制御
-     * - リトライ制限: 無限リトライを防ぐ回数制限
-     */
-    const inflight = new Map(); // 進行中の変換を管理するマップ
-    const INFLIGHT_TIMEOUT_MS = 30 * 1000; // 30秒で先行変換待ちをタイムアウト
-    const MAX_INFLIGHT_RETRIES = 1; // 最大リトライ回数（失敗時）
-    const RETRY_DELAY_MS = 500; // リトライ間隔
-    const FAILED_BACKOFF_MS = 5 * 1000; // 失敗後のバックオフ期間（5秒）
-    const failedCache = new LRUCache({ max: 10000, ttl: FAILED_BACKOFF_MS }); // 直近の失敗を記録して直ぐに再試行を避ける
+    // スタック処理システムでは複雑なin-flight管理は不要（順次処理のため）
 
     /**
      * セキュアなパス解決関数
@@ -841,6 +1373,17 @@ function startWebDAV(config) {
      * - エラーハンドリング: 各処理段階での適切なエラー応答
      */
     const httpServer = http.createServer(async (req, res) => {
+      // EventEmitterメモリリーク防止
+      res.setMaxListeners(20);
+
+      // シンプルな監視開始
+      const requestId = serverMonitor.startRequest();
+
+      // IPアドレス取得
+      const clientIP = req.connection.remoteAddress || req.socket.remoteAddress ||
+                      (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
+                      req.headers['x-forwarded-for']?.split(',')[0] || 'unknown';
+
       const urlPath = req.url.split("?")[0]; // クエリパラメータを削除
       // v20 と同様に decodeURIComponent を使って表示用パスを作成
       const displayPath = decodeURIComponent(urlPath); // URLデコード
@@ -865,146 +1408,94 @@ function startWebDAV(config) {
       logger.info(`[${label}] ${req.connection.remoteAddress} ${req.method} ${displayPath}`); // 基本ログ出力
 
       /**
-       * 画像ファイルのGETリクエスト処理
-       * 画像拡張子を持つファイルへのアクセス時に変換処理を実行
+       * 画像ファイルのGETリクエスト処理（スタック処理）
+       * 画像拡張子を持つファイルへのアクセス時に変換処理をスタックに追加
        */
       if (req.method === "GET" && IMAGE_EXTS.includes(ext)) {
-        return limit(async () => {
-          logger.info(`[変換要求][${label}] ${fullPath}`); // 変換要求ログを出力
-          const st = await statPWrap(fullPath).catch(() => null); // ファイルの情報を取得
+        logger.info(`[変換要求][${label}] ${fullPath}`); // 変換要求ログを出力
 
-          // ファイルが存在しない場合（ディレクトリやファイルでない場合）
-          if (!st || !st.isFile()) {
-            logger.warn(`[404 Not Found][${label}] ${fullPath}`); // 警告ログを出力
-            res.writeHead(404); // Not Found
-            return res.end("Not found"); // エラーメッセージを返す
-          }
+        // 画像変換処理をスタックに追加
+        requestStack.push({
+          displayPath,
+          res,
+          processor: async () => {
+            const st = await statPWrap(fullPath).catch(() => null); // ファイルの情報を取得
 
-          // 画像サイズが1MB以上の場合のみキャッシュ
-          const shouldCache = st.size >= getCacheMinSize(); // キャッシュを使用するかどうか
+            // ファイルが存在しない場合（ディレクトリやファイルでない場合）
+            if (!st || !st.isFile()) {
+              logger.warn(`[404 Not Found][${label}] ${fullPath}`); // 警告ログを出力
+              res.writeHead(404); // Not Found
+              return res.end("Not found"); // エラーメッセージを返す
+            }
 
-          /**
-           * 品質パラメータの取得と検証
-           * クエリパラメータから品質を取得し、30-90の範囲に制限
-           * 設定ファイルから動的にデフォルト品質を取得
-           */
+            // 画像サイズが1MB以上の場合のみキャッシュ
+            const shouldCache = st.size >= getCacheMinSize(); // キャッシュを使用するかどうか
+
+            /**
+             * 品質パラメータの取得と検証
+             * クエリパラメータから品質を取得し、30-90の範囲に制限
+             * 設定ファイルから動的にデフォルト品質を取得
+             */
             const qParam = req.url.match(/[?&]q=(\d+)/)?.[1]; // クエリからqualityを取得
             const quality = qParam
               ? Math.min(Math.max(parseInt(qParam, 10), 30), 90) // 30から90の範囲でqualityを取得
               : getDefaultQuality(); // 動的なデフォルト品質を使用
 
-          /**
-           * キャッシュキーの生成
-           * ファイルパス、リサイズサイズ、品質、変更時間、ファイルサイズを含めて
-           * ファイルの変更を検知し、適切なキャッシュ管理を実現
-           *
-           * 技術的詳細:
-           * - MD5ハッシュ: 固定長のキャッシュキー生成
-           * - 変更検知: mtimeMsとsizeによるファイル変更の検出
-           * - パラメータ包含: 品質・リサイズ設定の変更も検知
-           * - 衝突回避: 複数パラメータの組み合わせによる一意性保証
-           */
-          const key = crypto
-            .createHash("md5") // MD5ハッシュアルゴリズムを使用
-            .update(fullPath + "|" + (getPhotoSize() ?? "o") + "|" + quality + "|" + String(st.mtimeMs) + "|" + String(st.size)) // 複数パラメータを連結
-            .digest("hex"); // キャッシュキーを生成
-          const cachePath = path.join(CACHE_DIR, key + ".webp"); // キャッシュファイルのパス
+            /**
+             * キャッシュキーの生成
+             * ファイルパス、リサイズサイズ、品質、変更時間、ファイルサイズを含めて
+             * ファイルの変更を検知し、適切なキャッシュ管理を実現
+             */
+            const key = crypto
+              .createHash("md5") // MD5ハッシュアルゴリズムを使用
+              .update(fullPath + "|" + (getPhotoSize() ?? "o") + "|" + quality + "|" + String(st.mtimeMs) + "|" + String(st.size)) // 複数パラメータを連結
+              .digest("hex"); // キャッシュキーを生成
+            const cachePath = path.join(CACHE_DIR, key + ".webp"); // キャッシュファイルのパス
 
-          /**
-           * キャッシュファイルの存在確認とレスポンス
-           * 非同期でチェックしてブロッキングを避ける
-           */
-          if (shouldCache) {
-            try {
-              const cst = await statPWrap(cachePath).catch(() => null); // キャッシュファイルの情報を取得
-              if (cst && cst.isFile && cst.isFile()) {
-                // キャッシュファイルが存在する場合、直接レスポンス
-                const headers = {
-                  "Content-Type": "image/webp", // WebP画像のMIMEタイプ
-                  "Content-Length": cst.size, // キャッシュファイルのサイズ
-                  "Last-Modified": new Date(cst.mtimeMs).toUTCString(), // 最終更新日時
-                  ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"', // ETagヘッダー
-                  Connection: "Keep-Alive", // Keep-Alive接続
-                  "Keep-Alive": "timeout=600", // Keep-Aliveタイムアウト
-                };
-                res.writeHead(200, headers); // OK
-                return fs.createReadStream(cachePath).pipe(res); // キャッシュファイルをストリームでレスポンス
-              }
-            } catch (e) {
-              logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
-            }
-          }
-
-          /**
-           * 失敗バックオフチェック
-           * 最近失敗した変換の即座な再試行を避ける
-           */
-          if (shouldCache && failedCache.has(key)) {
-            logger.warn(`[backoff][${label}] recent failure for key, skipping retry: ${key}`); // 警告ログを出力
-            res.writeHead(503); // Service Unavailable
-            return res.end("Temporary conversion failure, try again later"); // 一時的なエラーメッセージを返す
-          }
-
-          /**
-           * 重複変換の排除（in-flight deduplication）
-           * 同じキーで変換中の場合は、その完了を待つ
-           */
-          if (shouldCache && inflight.has(key)) {
-            try {
-              await inflight.get(key); // 進行中の変換完了を待機
-              const cst = await statPWrap(cachePath).catch(() => null); // キャッシュファイルの情報を再取得
-              if (cst && cst.isFile && cst.isFile()) {
-                // 変換完了後、キャッシュファイルをレスポンス
-                res.writeHead(200, { "Content-Type": "image/webp", "Content-Length": cst.size }); // OK
-                return fs.createReadStream(cachePath).pipe(res); // キャッシュファイルをストリームでレスポンス
-              }
-            } catch (e) {
-              // 先行変換が失敗したら落ちて次で再生成（待ちがタイムアウト等で失敗）
-              logger.warn("[inflight wait error async]", e); // 警告ログを出力
-            }
-          }
-
-          /**
-           * 画像変換実行関数
-           * リトライと失敗バックオフ付きで変換を実行し、オプションで原子的にキャッシュ
-           */
-          const performConversion = async () => {
-            let attempt = 0; // リトライ回数カウンタ
-            while (true) {
+            /**
+             * キャッシュファイルの存在確認とレスポンス
+             * 非同期でチェックしてブロッキングを避ける
+             */
+            if (shouldCache) {
               try {
-                await convertAndRespond({ fullPath, displayPath, cachePath: shouldCache ? cachePath : null, quality, Photo_Size: getPhotoSize(), label, fs, sharp, execFile, res }); // 変換とレスポンス送信
-                return; // 成功
-              } catch (e) {
-                attempt++; // リトライ回数をインクリメント
-                logger.warn(`[inflight convert error][${label}] key=${key} attempt=${attempt} err=${e && e.message ? e.message : e}`); // 警告ログを出力
-                if (attempt > MAX_INFLIGHT_RETRIES) {
-                  // 迅速な再試行を避けるために失敗を記録
-                  try {
-                    failedCache.set(key, true); // 失敗をキャッシュに記録
-                  } catch (ee) {}
-                  throw e; // 最大リトライ回数を超えたらエラーをスロー
+                const cst = await statPWrap(cachePath).catch(() => null); // キャッシュファイルの情報を取得
+                if (cst && cst.isFile && cst.isFile()) {
+                  // キャッシュファイルが存在する場合、直接レスポンス
+                  const headers = {
+                    "Content-Type": "image/webp", // WebP画像のMIMEタイプ
+                    "Content-Length": cst.size, // キャッシュファイルのサイズ
+                    "Last-Modified": new Date(cst.mtimeMs).toUTCString(), // 最終更新日時
+                    ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"', // ETagヘッダー
+                    Connection: "Keep-Alive", // Keep-Alive接続
+                    "Keep-Alive": "timeout=600", // Keep-Aliveタイムアウト
+                  };
+                  res.writeHead(200, headers); // OK
+                  return fs.createReadStream(cachePath).pipe(res); // キャッシュファイルをストリームでレスポンス
                 }
-                // リトライ前の短いバックオフ
-                await new Promise((r) => setTimeout(r, RETRY_DELAY_MS)); // リトライ間隔待機
+              } catch (e) {
+                logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
               }
             }
-          };
 
-          const work = performConversion(); // 変換処理を開始
-
-          /**
-           * キャッシュ使用時のin-flight管理
-           * 待機者が無限にハングしないようにタイムアウトでラップ
-           */
-          if (shouldCache) {
-            // 待機者が無限にハングしないようにタイムアウトでラップ
-            const timed = Promise.race([work, new Promise((_, rej) => setTimeout(() => rej(new Error("inflight timeout")), INFLIGHT_TIMEOUT_MS))]); // タイムアウト付きで待機
-            inflight.set(key, timed); // in-flightマップに登録
-            timed.then(() => inflight.delete(key)).catch(() => inflight.delete(key)); // 完了時にin-flightマップから削除
+            // 画像変換を実行
+            await convertAndRespond({ 
+              fullPath, 
+              displayPath, 
+              cachePath: shouldCache ? cachePath : null, 
+              quality, 
+              Photo_Size: getPhotoSize(), 
+              label, 
+              fs, 
+              sharp, 
+              execFile, 
+              res, 
+              clientIP 
+            });
           }
-
-          return work; // 変換処理のPromiseを返す
         });
+
+        // スタック処理なので即座にレスポンスを返さない（スタックで処理される）
+        return;
       }
 
       /**
@@ -1013,7 +1504,7 @@ function startWebDAV(config) {
        */
       try {
         logger.info(`[WebDAV][${label}] ${req.method} ${displayPath}`); // WebDAVリクエストのログを出力
-        
+
         // レスポンスオブジェクトの型チェック（WebDAVサーバーとの互換性確保）
         if (typeof res.setHeader === 'function') {
           res.setHeader("Connection", "Keep-Alive"); // Keep-Alive接続
@@ -1021,79 +1512,79 @@ function startWebDAV(config) {
           res.setHeader("Accept-Ranges", "bytes"); // バイトレンジリクエストをサポート
           res.setHeader("Cache-Control", "public, max-age=0, must-revalidate"); // キャッシュ制御ヘッダー
         }
-        
+
         // WebDAVレスポンスの圧縮処理
         if (getCompressionEnabled() && typeof res.setHeader === 'function') {
           const acceptEncoding = req.headers['accept-encoding'] || '';
           const supportsGzip = acceptEncoding.includes('gzip');
-          
+
           if (supportsGzip) {
             // レスポンスのラッパーを作成して圧縮処理を追加
             const originalWriteHead = res.writeHead;
             const originalWrite = res.write;
             const originalEnd = res.end;
-            
+
             let responseData = [];
             let headersWritten = false;
-            
+
             res.writeHead = function(statusCode, statusMessage, headers) {
               if (typeof statusCode === 'object') {
                 headers = statusCode;
                 statusCode = 200;
               }
               headers = headers || {};
-              
+
               // Content-Typeを確認
               const contentType = headers['content-type'] || res.getHeader('content-type') || '';
-              const isTextResponse = contentType.includes('xml') || 
-                                    contentType.includes('html') || 
-                                    contentType.includes('json') || 
+              const isTextResponse = contentType.includes('xml') ||
+                                    contentType.includes('html') ||
+                                    contentType.includes('json') ||
                                     contentType.includes('text');
-              
+
               if (isTextResponse) {
                 // テキストレスポンスの場合は圧縮準備
                 headers['Vary'] = 'Accept-Encoding';
               }
-              
+
               headersWritten = true;
               return originalWriteHead.call(this, statusCode, statusMessage, headers);
             };
-            
+
             res.write = function(chunk, encoding) {
               if (chunk) {
                 responseData.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
               }
               return true;
             };
-            
+
             res.end = function(chunk, encoding) {
               // 既にレスポンスが終了している場合は何もしない
               if (res.headersSent && res.finished) {
                 return;
               }
-              
+
               if (chunk) {
                 responseData.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
               }
-              
+
               if (responseData.length === 0) {
                 return originalEnd.call(this);
               }
-              
+
               const fullData = Buffer.concat(responseData);
               const contentType = res.getHeader('content-type') || '';
-              const isTextResponse = contentType.includes('xml') || 
-                                    contentType.includes('html') || 
-                                    contentType.includes('json') || 
+              const isTextResponse = contentType.includes('xml') ||
+                                    contentType.includes('html') ||
+                                    contentType.includes('json') ||
                                     contentType.includes('text');
-              
+
               // 最小サイズ制限（1KB未満は圧縮しない）
               const MIN_COMPRESS_SIZE = 1024;
               if (!isTextResponse || fullData.length < MIN_COMPRESS_SIZE) {
                 logger.info(`[圧縮スキップ][${label}] ${displayPath} - 条件未満: テキスト=${isTextResponse}, サイズ=${fullData.length}`);
                 return originalEnd.call(this, fullData);
               }
-              
+
               // 圧縮処理
               zlib.gzip(fullData, {
                 level: 9,
@@ -1104,22 +1595,22 @@ function startWebDAV(config) {
                 if (res.headersSent && res.finished) {
                   return;
                 }
-                
+
                 if (err) {
                   logger.warn(`[圧縮エラー][${label}] ${displayPath}: ${err.message}`);
                   return originalEnd.call(this, fullData);
                 }
-                
+
                 // 圧縮効果の確認
                 const compressionRatio = compressed.length / fullData.length;
                 const threshold = getCompressionThreshold();
                 logger.info(`[圧縮結果][${label}] ${displayPath} - 圧縮率: ${(compressionRatio * 100).toFixed(1)}%, 閾値: ${(threshold * 100).toFixed(1)}%`);
-                
+
                 if (compressionRatio < threshold) {
                   // 圧縮レスポンスの送信
                   res.setHeader('Content-Encoding', 'gzip');
                   res.setHeader('Content-Length', compressed.length);
-                  
+
                   logger.info(`[圧縮適用][${label}] ${displayPath} サイズ: ${fullData.length} → ${compressed.length} bytes (圧縮率: ${(compressionRatio * 100).toFixed(1)}%)`);
                   originalEnd.call(this, compressed);
                 } else {
@@ -1130,16 +1621,16 @@ function startWebDAV(config) {
             };
           }
         }
-        
+
         // テキストファイルの圧縮処理（WebDAV処理の前）
         const textExts = ['.html', '.htm', '.css', '.js', '.json', '.xml', '.txt', '.md'];
         const isTextFile = textExts.includes(ext.toLowerCase());
-        
+
         if (getCompressionEnabled() && req.method === 'GET' && isTextFile && typeof res.setHeader === 'function') {
           // 圧縮対応の確認
           const acceptEncoding = req.headers['accept-encoding'] || '';
           const supportsGzip = acceptEncoding.includes('gzip');
-          
+
           if (supportsGzip) {
             try {
               // ファイルの存在確認
@@ -1148,7 +1639,7 @@ function startWebDAV(config) {
                 // ファイル読み込みと圧縮（高性能環境向け非同期処理）
                 const fileData = await fs.promises.readFile(fullPath);
                 const compressed = await new Promise((resolve, reject) => {
-                  zlib.gzip(fileData, { 
+                  zlib.gzip(fileData, {
                     level: 9,        // 圧縮レベル（高品質圧縮、CPUリソースを最大活用）
                     memLevel: 9,     // メモリ使用量（64GB環境で最大メモリ使用）
                     windowBits: 15   // ウィンドウサイズ（最大32KB）
@@ -1157,7 +1648,7 @@ function startWebDAV(config) {
                     else resolve(result);
                   });
                 });
-                
+
                 // 圧縮効果の確認（環境変数で閾値を制御可能）
                 const compressionRatio = compressed.length / fileData.length;
                 if (compressionRatio < getCompressionThreshold()) {
@@ -1178,10 +1669,19 @@ function startWebDAV(config) {
             }
           }
         }
-        
+
         server.executeRequest(req, res); // WebDAVサーバーにリクエストを処理させる
+
+        // WebDAVレスポンス終了時の処理
+        res.on('close', () => {
+          serverMonitor.endRequest();
+        });
+        res.on('finish', () => {
+          serverMonitor.endRequest();
+        });
       } catch (e) {
         logger.error("WebDAV error", e); // エラーログを出力
+        serverMonitor.endRequest(); // エラー時も監視終了
         if (!res.headersSent && typeof res.writeHead === 'function') {
           res.writeHead(500); // Internal Server Error
           res.end("WebDAV error"); // エラーメッセージを返す
@@ -1264,7 +1764,7 @@ function startWebDAV(config) {
  * 4. キャッシュファイルの原子的更新
  * 5. HTTPレスポンスへの直接ストリーミング
  */
-async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Photo_Size, label, fs, sharp, execFile, res }) {
+async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Photo_Size, label, fs, sharp, execFile, res, clientIP }) {
   // 軽量版（高速化設定）かどうかを判定
   const isFast = label.includes("軽量版"); // 軽量版はラベルに"軽量版"を含む
 
@@ -1288,7 +1788,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * - ストリーミング: メモリ効率的な画像処理
        * - エラーハンドリング: 変換失敗時の適切な処理
        */
-      transformer = sharp(fullPath, { limitInputPixels: 1e8 }); // 100Mピクセル制限
+      transformer = sharp(fullPath, { limitInputPixels: getSharpPixelLimit() }); // 動的設定によるピクセル制限（大量画像処理時のメモリ保護強化）
 
       // 回転補正は高速版では行わない（パフォーマンス優先）
       if (!isFast) transformer = transformer.rotate(); // EXIFに基づく自動回転
@@ -1346,7 +1846,25 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         smartSubsample: isFast ? false : true, // スマートサブサンプリング
       });
 
-      logger.info(`[変換実行][${label}] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality})`); // 変換実行ログを出力
+      // Sharp変換にタイムアウトを設定（5秒）
+      const sharpTimeout = setTimeout(() => {
+        logger.warn(`[Sharp変換タイムアウト] ${displayPath} - 5秒でタイムアウト`);
+        transformer.destroy();
+        onErrorFallback(new Error('Sharp conversion timeout'));
+      }, 5000);
+
+      // メモリ使用量の監視（大量画像処理時の診断用）- 初回のみ詳細ログ
+      const memUsage = process.memoryUsage();
+      const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+      const pixelLimit = getSharpPixelLimit();
+
+      // 初回のみ詳細ログを出力
+      if (!global.imageConversionLogged) {
+        logger.info(`[変換実行][${label}] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality}) [メモリ: ${memUsageMB}MB, ピクセル制限: ${pixelLimit} (型: ${typeof pixelLimit})]`);
+        global.imageConversionLogged = true;
+      } else {
+        logger.info(`[変換実行][${label}] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality})`);
+      }
 
       /**
        * ストリーミング処理の設定
@@ -1371,7 +1889,34 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * @param {Error} err - Sharp処理で発生したエラー
        */
       const onErrorFallback = (err) => {
-        logger.warn(`[Sharp失敗→ImageMagick][${label}] ${displayPath} : ${err && err.message ? err.message : err}`); // 警告ログを出力
+        // より詳細なエラー情報を出力
+        const errorMsg = err && err.message ? err.message : err;
+        const errorCode = err && err.code ? err.code : 'unknown';
+
+        if (errorMsg.includes('Premature close')) {
+          logger.info(`[Sharp Premature close - スキップ] ${displayPath} : Premature close (ストリーム終了) - エラーコード: ${errorCode}`);
+          // Premature closeエラーの場合は直接スキップ（ImageMagickフォールバックしない）
+          if (res && !res.headersSent) {
+            res.writeHead(410, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('Request cancelled due to stream error');
+          }
+          return resolve();
+        } else {
+          logger.warn(`[Sharp失敗→ImageMagick][${label}] ${displayPath} : ${errorMsg} (エラーコード: ${errorCode})`);
+
+          // 特定のエラーに対しては詳細情報を出力
+          if (errorCode === 'ENOENT') {
+            logger.error(`[Sharp失敗詳細] ファイルが見つかりません: ${fullPath}`);
+          } else if (errorCode === 'EACCES') {
+            logger.error(`[Sharp失敗詳細] ファイルアクセス権限がありません: ${fullPath}`);
+          } else if (errorCode === 'EMFILE' || errorCode === 'ENFILE') {
+            logger.error(`[Sharp失敗詳細] ファイルディスクリプタ不足: ${fullPath}`);
+          } else if (errorMsg.includes('Input file is missing')) {
+            logger.error(`[Sharp失敗詳細] 入力ファイルが存在しません: ${fullPath}`);
+          } else if (errorMsg.includes('limitInputPixels')) {
+            logger.error(`[Sharp失敗詳細] ピクセル制限超過: ${fullPath} (制限: ${getSharpPixelLimit()})`);
+          }
+        }
 
         // 一時ファイルの掃除（あれば）
         if (tmpPath) fs.unlink(tmpPath, () => {}); // 存在しない場合は無視
@@ -1394,9 +1939,41 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         // ImageMagickプロセスのエラーハンドリング
         magick.on("error", (err) => {
           logger.error(`[ImageMagick変換失敗][${label}] ${fullPath}: ${err}`); // エラーログを出力
-          if (!res.headersSent) res.writeHead(415); // サポートされていないメディアタイプ
-          res.end("Unsupported image format (sharp+magick error)"); // エラーメッセージを返す
-          return reject(err); // 呼び出し元にエラーを伝播
+
+          // ImageMagick失敗時は元画像を直接送信
+          logger.info(`[ImageMagick失敗→元画像送信][${label}] ${displayPath}`);
+
+          // HTTPヘッダー設定（まだ送信されていない場合）
+          if (!res.headersSent) {
+            // 元画像のContent-Typeを設定
+            const fileExt = path.extname(fullPath).toLowerCase();
+            let contentType = 'application/octet-stream';
+            if (fileExt === '.jpg' || fileExt === '.jpeg') contentType = 'image/jpeg';
+            else if (fileExt === '.png') contentType = 'image/png';
+            else if (fileExt === '.gif') contentType = 'image/gif';
+            else if (fileExt === '.webp') contentType = 'image/webp';
+            else if (fileExt === '.bmp') contentType = 'image/bmp';
+            else if (fileExt === '.tiff' || fileExt === '.tif') contentType = 'image/tiff';
+
+            res.setHeader("Content-Type", contentType);
+          }
+
+          // 元画像ファイルを直接ストリーミング
+          const fileStream = fs.createReadStream(fullPath);
+          fileStream.pipe(res);
+
+          fileStream.on("error", (streamErr) => {
+            logger.error(`[元画像送信失敗][${label}] ${displayPath}: ${streamErr.message}`);
+            if (!res.headersSent) res.writeHead(500);
+            res.end("Failed to read original image");
+            return reject(streamErr);
+          });
+
+          fileStream.on("end", () => {
+            logger.info(`[変換完了(元画像)][${label}] ${displayPath}`);
+            res.end();
+            return resolve();
+          });
         });
 
         // HTTPヘッダー設定（まだ送信されていない場合）
@@ -1405,12 +1982,76 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         }
 
         if (tmpPath) {
-          // キャッシュファイルへの書き込み処理
+        // キャッシュファイルへの書き込み処理（権限チェック付き）
+        try {
+          // 親ディレクトリの存在確認と作成
+          const tmpDir = path.dirname(tmpPath);
+          if (!fs.existsSync(tmpDir)) {
+            fs.mkdirSync(tmpDir, { recursive: true });
+          }
+
           const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルへの書き込みストリーム
 
           // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
-          pipeline(magick.stdout, writeStream).catch((e) => logger.error("[magick->tmp pipeline error]", e));
+          pipeline(magick.stdout, writeStream).catch((e) => {
+            // Premature closeエラーは頻発するため、ログレベルを調整
+            if (e.message && e.message.includes('Premature close')) {
+              logger.info(`[magick->tmp pipeline] ${e.message}`);
+              // Premature closeの場合はImageMagickプロセスを終了
+              if (magick && !magick.killed) {
+                try {
+                  magick.kill('SIGTERM');
+                  logger.info(`[ImageMagick強制終了(Premature close)] ${displayPath}`);
+                } catch (killErr) {
+                  // プロセス終了エラーは無視
+                }
+              }
+            } else {
+              logger.error(`[magick->tmp pipeline error] ${e.message}`);
+            }
+            // キャッシュ書き込み失敗時はキャッシュなしで続行
+          });
           magick.stdout.pipe(res, { end: false }); // レスポンスは手動で終了
+
+          // ImageMagickの標準出力エラーハンドリング
+          magick.stdout.on("error", (err) => {
+            logger.error(`[magick->res pipeline error] ${err.message}`);
+
+            // ImageMagickパイプラインエラー時は元画像を送信
+            logger.info(`[ImageMagickパイプラインエラー→元画像送信][${label}] ${displayPath}`);
+
+            // HTTPヘッダー設定（まだ送信されていない場合）
+            if (!res.headersSent) {
+              // 元画像のContent-Typeを設定
+              const fileExt = path.extname(fullPath).toLowerCase();
+              let contentType = 'application/octet-stream';
+              if (fileExt === '.jpg' || fileExt === '.jpeg') contentType = 'image/jpeg';
+              else if (fileExt === '.png') contentType = 'image/png';
+              else if (fileExt === '.gif') contentType = 'image/gif';
+              else if (fileExt === '.webp') contentType = 'image/webp';
+              else if (fileExt === '.bmp') contentType = 'image/bmp';
+              else if (fileExt === '.tiff' || fileExt === '.tif') contentType = 'image/tiff';
+
+              res.setHeader("Content-Type", contentType);
+            }
+
+            // 元画像ファイルを直接ストリーミング
+            const fileStream = fs.createReadStream(fullPath);
+            fileStream.pipe(res);
+
+            fileStream.on("error", (streamErr) => {
+              logger.error(`[元画像送信失敗][${label}] ${displayPath}: ${streamErr.message}`);
+              if (!res.headersSent) res.writeHead(500);
+              res.end("Failed to read original image");
+              return reject(streamErr);
+            });
+
+            fileStream.on("end", () => {
+              logger.info(`[変換完了(元画像)][${label}] ${displayPath}`);
+              res.end();
+              return resolve();
+            });
+          });
 
           // 書き込み完了時に原子的にリネーム
           writeStream.on("finish", () => {
@@ -1418,11 +2059,148 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
               fs.renameSync(tmpPath, cachePath); // 原子的にリネーム
             } catch (e) {
               // リネーム失敗は無視（競合状態の可能性）
+              logger.warn(`[キャッシュリネーム失敗] ${e.message}`);
             }
           });
-        } else {
+
+        // 書き込みストリームエラー処理
+        writeStream.on("error", (e) => {
+          logger.warn(`[キャッシュ書き込みエラー] ${e.message}`);
+          // キャッシュ失敗時はレスポンス継続（エラーを無視）
+          // レスポンスは継続されるため、処理は正常に完了する
+        });
+
+        // レスポンス終了時の処理（Premature closeエラー対策）
+        res.on("close", () => {
+          if (!res.headersSent || res.writableEnded) {
+            // レスポンスが正常に終了した場合は何もしない
+            return;
+          }
+          // Premature closeの場合は強制的にresolveを呼ぶ
+          logger.warn(`[Premature close検出] ${displayPath} - 強制完了`);
+
+          // ImageMagickプロセスを強制終了
+          if (magick && !magick.killed) {
+            try {
+              magick.kill('SIGTERM');
+              logger.info(`[ImageMagick強制終了] ${displayPath}`);
+            } catch (e) {
+              // プロセス終了エラーは無視
+            }
+          }
+
+          return resolve();
+        });
+        } catch (writeError) {
+          logger.warn(`[キャッシュディレクトリ作成失敗] ${writeError.message}`);
+          // キャッシュなしでレスポンス継続
+          pipeline(magick.stdout, res).catch((err) => {
+            // Premature closeエラーは頻発するため、ログレベルを調整
+            if (err.message && err.message.includes('Premature close')) {
+              logger.info(`[magick->res pipeline] ${err.message}`);
+              // Premature closeの場合はImageMagickプロセスを終了
+              if (magick && !magick.killed) {
+                try {
+                  magick.kill('SIGTERM');
+                  logger.info(`[ImageMagick強制終了(Premature close)] ${displayPath}`);
+                } catch (killErr) {
+                  // プロセス終了エラーは無視
+                }
+              }
+            } else {
+              logger.error(`[magick->res pipeline error] ${err.message}`);
+
+              // ImageMagickパイプラインエラー時は元画像を送信
+              logger.info(`[ImageMagickパイプラインエラー→元画像送信][${label}] ${displayPath}`);
+
+              // HTTPヘッダー設定（まだ送信されていない場合）
+              if (!res.headersSent) {
+                // 元画像のContent-Typeを設定
+                const fileExt = path.extname(fullPath).toLowerCase();
+                let contentType = 'application/octet-stream';
+                if (fileExt === '.jpg' || fileExt === '.jpeg') contentType = 'image/jpeg';
+                else if (fileExt === '.png') contentType = 'image/png';
+                else if (fileExt === '.gif') contentType = 'image/gif';
+                else if (fileExt === '.webp') contentType = 'image/webp';
+                else if (fileExt === '.bmp') contentType = 'image/bmp';
+                else if (fileExt === '.tiff' || fileExt === '.tif') contentType = 'image/tiff';
+
+                res.setHeader("Content-Type", contentType);
+              }
+
+              // 元画像ファイルを直接ストリーミング
+              const fileStream = fs.createReadStream(fullPath);
+              fileStream.pipe(res);
+
+              fileStream.on("error", (streamErr) => {
+                logger.error(`[元画像送信失敗][${label}] ${displayPath}: ${streamErr.message}`);
+                if (!res.headersSent) res.writeHead(500);
+                res.end("Failed to read original image");
+                return reject(streamErr);
+              });
+
+              fileStream.on("end", () => {
+                logger.info(`[変換完了(元画像)][${label}] ${displayPath}`);
+                res.end();
+                return resolve();
+              });
+            }
+          });
+        }
+      } else {
           // キャッシュなしの場合は直接レスポンスにストリーミング
-          pipeline(magick.stdout, res).catch((e) => logger.error("[magick->res pipeline error]", e)); // レスポンスはパイプラインで自動終了
+          pipeline(magick.stdout, res).catch((e) => {
+            // Premature closeエラーは頻発するため、ログレベルを調整
+            if (e.message && e.message.includes('Premature close')) {
+              logger.info(`[magick->res pipeline] ${e.message}`);
+              // Premature closeの場合はImageMagickプロセスを終了
+              if (magick && !magick.killed) {
+                try {
+                  magick.kill('SIGTERM');
+                  logger.info(`[ImageMagick強制終了(Premature close)] ${displayPath}`);
+                } catch (killErr) {
+                  // プロセス終了エラーは無視
+                }
+              }
+            } else {
+              logger.error(`[magick->res pipeline error] ${e.message}`);
+
+              // ImageMagickパイプラインエラー時は元画像を送信
+              logger.info(`[ImageMagickパイプラインエラー→元画像送信][${label}] ${displayPath}`);
+
+              // HTTPヘッダー設定（まだ送信されていない場合）
+              if (!res.headersSent) {
+                // 元画像のContent-Typeを設定
+                const fileExt = path.extname(fullPath).toLowerCase();
+                let contentType = 'application/octet-stream';
+                if (fileExt === '.jpg' || fileExt === '.jpeg') contentType = 'image/jpeg';
+                else if (fileExt === '.png') contentType = 'image/png';
+                else if (fileExt === '.gif') contentType = 'image/gif';
+                else if (fileExt === '.webp') contentType = 'image/webp';
+                else if (fileExt === '.bmp') contentType = 'image/bmp';
+                else if (fileExt === '.tiff' || fileExt === '.tif') contentType = 'image/tiff';
+
+                res.setHeader("Content-Type", contentType);
+              }
+
+              // 元画像ファイルを直接ストリーミング
+              const fileStream = fs.createReadStream(fullPath);
+              fileStream.pipe(res);
+
+              fileStream.on("error", (streamErr) => {
+                logger.error(`[元画像送信失敗][${label}] ${displayPath}: ${streamErr.message}`);
+                if (!res.headersSent) res.writeHead(500);
+                res.end("Failed to read original image");
+                return reject(streamErr);
+              });
+
+              fileStream.on("end", () => {
+                logger.info(`[変換完了(元画像)][${label}] ${displayPath}`);
+                res.end();
+                return resolve();
+              });
+            }
+          }); // レスポンスはパイプラインで自動終了
         }
 
         // 変換完了時の処理
@@ -1431,15 +2209,67 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
           magickResponseSize += chunk.length; // レスポンスサイズを累計
         });
         magick.stdout.on("end", () => {
-          logger.info(`[変換完了(fallback)][${label}] ${displayPath} (サイズ: ${magickResponseSize.toLocaleString()} bytes)`); // 変換完了ログを出力
+          logger.info(`[変換完了(ImageMagick)][${label}] ${displayPath} (サイズ: ${magickResponseSize.toLocaleString()} bytes)`); // ImageMagick変換完了ログを出力
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
+        });
+
+        // Premature closeエラー対策（onErrorFallback内）
+        res.on("close", () => {
+          if (!res.headersSent || res.writableEnded) {
+            // レスポンスが正常に終了した場合は何もしない
+            return;
+          }
+          // Premature closeの場合は強制的にresolveを呼ぶ
+          logger.warn(`[Premature close検出(fallback)] ${displayPath} - 強制完了`);
+
+          // ImageMagickプロセスを強制終了
+          if (magick && !magick.killed) {
+            try {
+              magick.kill('SIGTERM');
+              logger.info(`[ImageMagick強制終了] ${displayPath}`);
+            } catch (e) {
+              // プロセス終了エラーは無視
+            }
+          }
+
+          return resolve();
         });
       };
 
       // エラーハンドリングの設定
-      transformer.on("error", onErrorFallback); // Sharp変換エラー時にフォールバック
-      pass.on("error", onErrorFallback); // PassThroughエラー時にフォールバック
+      transformer.on("error", (err) => {
+        clearTimeout(sharpTimeout); // タイムアウトをクリア
+        const errorMsg = err && err.message ? err.message : err;
+
+        // Premature closeエラーの場合は直接スキップ（フォールバックしない）
+        if (errorMsg.includes('Premature close')) {
+          logger.info(`[Sharp Premature close - スキップ] ${displayPath}`);
+          if (res && !res.headersSent) {
+            res.writeHead(410, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('Request cancelled due to stream error');
+          }
+          return resolve();
+        }
+
+        onErrorFallback(err); // その他のSharp変換エラー時にフォールバック
+      });
+      pass.on("error", (err) => {
+        clearTimeout(sharpTimeout); // タイムアウトをクリア
+        const errorMsg = err && err.message ? err.message : err;
+
+        // Premature closeエラーの場合は直接スキップ（フォールバックしない）
+        if (errorMsg.includes('Premature close')) {
+          logger.info(`[PassThrough Premature close - スキップ] ${displayPath}`);
+          if (res && !res.headersSent) {
+            res.writeHead(410, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('Request cancelled due to stream error');
+          }
+          return resolve();
+        }
+
+        onErrorFallback(err); // その他のPassThroughエラー時にフォールバック
+      });
 
       /**
        * キャッシュ処理の分岐
@@ -1471,11 +2301,30 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         });
 
         // ストリーミング処理の設定（エラーハンドリング付き）
-        pipeline(pass, writeStream).catch((e) => logger.error("[cache write pipeline error]", e)); // キャッシュ書き込み
-        pipeline(pass, res).catch((e) => logger.error("[response pipeline error]", e)); // レスポンス送信
+        pipeline(pass, writeStream).catch((e) => {
+          // Premature closeエラーは頻発するため、ログレベルを調整
+          if (e.message && e.message.includes('Premature close')) {
+            logger.info(`[cache write pipeline] ${e.message}`);
+          } else {
+            logger.error(`[cache write pipeline error] ${e.message}`);
+          }
+          // キャッシュ書き込み失敗時はレスポンス継続
+        }); // キャッシュ書き込み
+        pipeline(pass, res).catch((e) => {
+          // Premature closeエラーは頻発するため、ログレベルを調整
+          if (e.message && e.message.includes('Premature close')) {
+            logger.info(`[response pipeline] ${e.message}`);
+          } else {
+            logger.error(`[response pipeline error] ${e.message}`);
+          }
+          // レスポンスエラー時は適切に終了
+        }); // レスポンス送信
 
         // ストリーム終了時の処理
         pass.on("end", async () => {
+          // Sharp変換タイムアウトをクリア
+          clearTimeout(sharpTimeout);
+
           // 原子的キャッシュ更新処理
           if (wroteAny) {
             try {
@@ -1496,7 +2345,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
             } catch (_) {}
           }
 
-          logger.info(`[変換完了][${label}] ${displayPath} (サイズ: ${responseSize.toLocaleString()} bytes)`); // 変換完了ログを出力
+          logger.info(`[変換完了(Sharp)][${label}] ${displayPath} (サイズ: ${responseSize.toLocaleString()} bytes)`); // Sharp変換完了ログを出力
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
         });
@@ -1517,14 +2366,36 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
           responseSize += chunk.length; // レスポンスサイズを累計
         });
 
-        pipeline(pass, res).catch((e) => logger.error("[response pipeline error]", e)); // レスポンス送信
+        pipeline(pass, res).catch((e) => {
+          // Premature closeエラーは頻発するため、ログレベルを調整
+          if (e.message && e.message.includes('Premature close')) {
+            logger.info(`[response pipeline] ${e.message}`);
+          } else {
+            logger.error(`[response pipeline error] ${e.message}`);
+          }
+          // レスポンスエラー時は適切に終了
+        }); // レスポンス送信
 
         // ストリーム終了時の処理
 
         pass.on("end", () => {
-          logger.info(`[変換完了][${label}] ${fullPath} (サイズ: ${responseSize.toLocaleString()} bytes)`); // 変換完了ログを出力
+          // Sharp変換タイムアウトをクリア
+          clearTimeout(sharpTimeout);
+
+          logger.info(`[変換完了(Sharp)][${label}] ${fullPath} (サイズ: ${responseSize.toLocaleString()} bytes)`); // Sharp変換完了ログを出力
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
+        });
+
+        // レスポンス終了時の処理（Premature closeエラー対策）
+        res.on("close", () => {
+          if (!res.headersSent || res.writableEnded) {
+            // レスポンスが正常に終了した場合は何もしない
+            return;
+          }
+          // Premature closeの場合は強制的にresolveを呼ぶ
+          logger.warn(`[Premature close検出(キャッシュなし)] ${displayPath} - 強制完了`);
+          return resolve();
         });
       }
     } catch (e) {
@@ -1558,22 +2429,77 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
 
       if (tmpPath) {
         // キャッシュファイルへの書き込み処理
-        const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルに書き込み
+        try {
+          // 親ディレクトリの存在確認と作成
+          const tmpDir = path.dirname(tmpPath);
+          if (!fs.existsSync(tmpDir)) {
+            fs.mkdirSync(tmpDir, { recursive: true });
+          }
 
-        // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
-        pipeline(magick.stdout, writeStream).catch((e) => logger.error("[magick->tmp pipeline error]", e)); // キャッシュ書き込み
-        magick.stdout.pipe(res, { end: false }); // レスポンスは手動で終了
+          const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルに書き込み
 
-        // 書き込み完了時の原子的リネーム処理
-        writeStream.on("finish", async () => {
-          try {
-            await fs.promises.rename(tmpPath, cachePath).catch(() => {}); // リネーム失敗は無視（競合状態の可能性）
-          } catch (e) {}
-        });
+          // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
+          pipeline(magick.stdout, writeStream).catch((e) => {
+            // Premature closeエラーは頻発するため、ログレベルを調整
+            if (e.message && e.message.includes('Premature close')) {
+              logger.info(`[magick->tmp pipeline] ${e.message}`);
+              // Premature closeの場合はImageMagickプロセスを終了
+              if (magick && !magick.killed) {
+                try {
+                  magick.kill('SIGTERM');
+                  logger.info(`[ImageMagick強制終了(Premature close)] ${displayPath}`);
+                } catch (killErr) {
+                  // プロセス終了エラーは無視
+                }
+              }
+            } else {
+              logger.error(`[magick->tmp pipeline error] ${e.message}`);
+            }
+            // キャッシュ書き込み失敗時はレスポンス継続
+          }); // キャッシュ書き込み
+          magick.stdout.pipe(res, { end: false }); // レスポンスは手動で終了
+
+          // 書き込み完了時の原子的リネーム処理
+          writeStream.on("finish", async () => {
+            try {
+              await fs.promises.rename(tmpPath, cachePath).catch((e) => {
+                logger.warn(`[初期化エラー時キャッシュリネーム失敗] ${e.message}`);
+              }); // リネーム失敗は警告ログ出力
+            } catch (e) {
+              logger.warn(`[初期化エラー時キャッシュリネーム例外] ${e.message}`);
+            }
+          });
+
+          // 書き込みストリームエラー処理
+          writeStream.on("error", (e) => {
+            logger.warn(`[初期化エラー時キャッシュ書き込みエラー] ${e.message}`);
+          });
+        } catch (writeError) {
+          logger.warn(`[初期化エラー時キャッシュディレクトリ作成失敗] ${writeError.message}`);
+        }
       } else {
-        // キャッシュなしの場合は直接レスポンスにストリーミング
-        pipeline(magick.stdout, res).catch((e) => logger.error("[magick->res pipeline error]", e)); // レスポンスはパイプラインで自動終了
+          // キャッシュなしの場合は直接レスポンスにストリーミング
+          pipeline(magick.stdout, res).catch((e) => {
+            // Premature closeエラーは頻発するため、ログレベルを調整
+            if (e.message && e.message.includes('Premature close')) {
+              logger.info(`[magick->res pipeline] ${e.message}`);
+              // Premature closeの場合はImageMagickプロセスを終了
+              if (magick && !magick.killed) {
+                try {
+                  magick.kill('SIGTERM');
+                  logger.info(`[ImageMagick強制終了(Premature close)] ${displayPath}`);
+                } catch (killErr) {
+                  // プロセス終了エラーは無視
+                }
+              }
+            } else {
+              logger.error(`[magick->res pipeline error] ${e.message}`);
+            }
+            // レスポンスエラー時は適切に終了
+          }); // レスポンスはパイプラインで自動終了
       }
+
+      // レスポンス終了時の処理（スタック処理では不要）
 
       // 変換完了時の処理
       let initErrorResponseSize = 0; // Sharp初期化エラー時のレスポンスサイズ
@@ -1581,10 +2507,39 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
         initErrorResponseSize += chunk.length; // レスポンスサイズを累計
       });
       magick.stdout.on("end", () => {
-        logger.info(`[変換完了(fallback)][${label}] ${displayPath} (サイズ: ${initErrorResponseSize.toLocaleString()} bytes)`); // 変換完了ログを出力
+        logger.info(`[変換完了(ImageMagick)][${label}] ${displayPath} (サイズ: ${initErrorResponseSize.toLocaleString()} bytes)`); // ImageMagick変換完了ログを出力
         res.end(); // レスポンス終了
         return resolve(); // 成功
       });
+
+      // レスポンス終了時の処理（Premature closeエラー対策）
+      res.on("close", () => {
+        if (!res.headersSent || res.writableEnded) {
+          // レスポンスが正常に終了した場合は何もしない
+          return;
+        }
+        // Premature closeの場合は強制的にresolveを呼ぶ
+        logger.warn(`[Premature close検出(初期化エラー)] ${displayPath} - 強制完了`);
+
+        // ImageMagickプロセスを強制終了
+        if (magick && !magick.killed) {
+          try {
+            magick.kill('SIGTERM');
+            logger.info(`[ImageMagick強制終了] ${displayPath}`);
+          } catch (e) {
+            // プロセス終了エラーは無視
+          }
+        }
+
+        return resolve();
+      });
     }
+  });
+
+  // HTTPサーバーのメイン処理のエラーハンドリング（スタック処理では簡素化）
+  httpServer.on('request', (req, res) => {
+    res.on('error', (err) => {
+      logger.error('Response error', err);
+    });
   });
 }

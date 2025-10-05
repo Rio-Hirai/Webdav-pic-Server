@@ -1,10 +1,25 @@
 {
   "name": "webdav-pc-server",
-  "version": "21.0.0",
+  "version": "22.0.0",
   "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node main.js"
+    "start": "node main.js",
+    "start:bg": "start /b node main.js",
+    "startbg": "start /min node main.js",
+    "startbg2": "start_background.bat",
+    "start:ps-bg": "powershell -ExecutionPolicy Bypass -File start_background.ps1",
+    "start:ssh": "nohup node main.js > server.log 2>&1 &",
+    "start:ssh-win": "start /b /min node main.js",
+    "restart": "restart.bat",
+    "restart:auto": "restart_server.bat",
+    "restart:advanced": "advanced_restart.bat",
+    "restart:ps": "powershell -ExecutionPolicy Bypass -File restart_server.ps1",
+    "shortcut": "powershell -Command \"& '.\\WebDAVサーバー.lnk'\"",
+    "stopall": "taskkill /IM node.exe /F",
+    "stop": "for /f \"tokens=5\" %i in ('netstat -ano ^| findstr :1900') do taskkill /PID %i /F & for /f \"tokens=5\" %i in ('netstat -ano ^| findstr :1901') do taskkill /PID %i /F & for /f \"tokens=5\" %i in ('netstat -ano ^| findstr :1902') do taskkill /PID %i /F",
+    "stop:all": "taskkill /IM node.exe /F & timeout /t 2 /nobreak >nul & for /f \"tokens=5\" %i in ('netstat -ano ^| findstr :190') do taskkill /PID %i /F",
+    "status": "netstat -ano | findstr :190"
   },
   "keywords": [],
   "author": "",

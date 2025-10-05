@@ -6,8 +6,11 @@
         "EACCES",
         "ENOENT",
         "EXIF",
+        "findstr",
         "libvips",
         "magick",
+        "Magik",
+        "nohup",
         "opendir",
         "Owlfiles",
         "pgrep",
@@ -15,6 +18,10 @@
         "PROPPATCH",
         "Readdle",
         "Ryzen",
+        "startbg",
+        "stopall",
+        "SUBPIC",
+        "taskkill",
         "webdav"
     ]
 }

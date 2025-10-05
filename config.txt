@@ -1,24 +1,43 @@
 # WebDAV画像変換サーバー設定ファイル
-# 設定変更後、サーバーの自動再読み込み（30秒以内）
+# 設定変更後、サーバーの自動再読み込み（10秒以内）
 
 # 圧縮設定
 COMPRESSION_ENABLED=true
 COMPRESSION_THRESHOLD=0.3
 
 # 画像変換設定（デフォルト値）
-DEFAULT_QUALITY=30
-PHOTO_SIZE=640
+DEFAULT_QUALITY=80
+PHOTO_SIZE=1920
 
-# キャッシュ設定（ミリ秒）
-CACHE_TTL_MS=300000
-CACHE_MIN_SIZE=1048576
+# キャッシュ設定（ミリ秒）- Ryzen 3950X・64GB最適化
+CACHE_TTL_MS=600000
+CACHE_MIN_SIZE=2097152
+
+# メモリ管理設定（大量アクセス対策）- Ryzen 3950X・64GB最適化
+MAX_CONCURRENCY=16
+SHARP_MEMORY_LIMIT=1024
+SHARP_PIXEL_LIMIT=100000000
+
+# レート制限設定（大量アクセス対策）- Ryzen 3950X・64GB最適化
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REQUESTS=300
+RATE_LIMIT_WINDOW_MS=60000
+RATE_LIMIT_QUEUE_SIZE=500
+
+# 緊急時設定（レート制限を一時的に無効化する場合は false に変更）
+EMERGENCY_DISABLE_RATE_LIMIT=false
+
+# スタック処理システム設定 - Ryzen 3950X・64GB最適化
+# スタック処理では複雑な過負荷対策は不要（LIFO方式で最新リクエストが最優先）
+STACK_MAX_SIZE=200
+STACK_PROCESSING_DELAY_MS=5
 
 # サーバー設定
 MAX_LIST=1280
 
 # 再起動設定
 RESTART_ENABLED=false
-RESTART_TIME=03:00
+RESTART_TIME=12:10
 
 # ImageMagick設定
 MAGICK_PATH=magick

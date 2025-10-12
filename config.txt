@@ -11,8 +11,8 @@ ROOT_PATH=Z:/書籍
 MAX_LIST=1280
 
 # 画像変換設定
-PHOTO_SIZE=640
-DEFAULT_QUALITY=30
+PHOTO_SIZE=1280
+DEFAULT_QUALITY=80
 
 # 画像処理モード: 1=高速処理(effort=0,smartSubsample=false,回転補正なし), 2=バランス(effort=1,smartSubsample=true,回転補正あり), 3=高品質(effort=1,smartSubsample=true,回転補正あり,最適リサイズ)
 IMAGE_MODE=2
@@ -23,7 +23,7 @@ CACHE_MIN_SIZE=2097152
 
 # メモリ管理設定（大量アクセス対策）- Ryzen 3950X・64GB最適化
 MAX_CONCURRENCY=16
-SHARP_MEMORY_LIMIT=1024
+SHARP_MEMORY_LIMIT=2048
 SHARP_PIXEL_LIMIT=100000000
 
 # レート制限設定（大量アクセス対策）- Ryzen 3950X・64GB最適化
@@ -32,7 +32,7 @@ RATE_LIMIT_REQUESTS=300
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_QUEUE_SIZE=500
 
-# 緊急時設定（レート制限を一時的に無効化する場合は false に変更）
+# 緊急時設定（レート制限を一時的に無効化する場合は false に変更）ーーーーん
 EMERGENCY_DISABLE_RATE_LIMIT=false
 
 # スタック処理システム設定 - Ryzen 3950X・64GB最適化

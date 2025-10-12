@@ -1,3 +1,5 @@
 node_modules
 *sub*
 *test*
+server.log
+webdav-server.pid

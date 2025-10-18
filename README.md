@@ -424,7 +424,7 @@ export RESTART_ENABLED="true"
 export RESTART_TIME="03:00"
 
 # 毎日午後2時に再起動
-export RESTART_ENABLED="true"  
+export RESTART_ENABLED="true"
 export RESTART_TIME="14:00"
 
 # 再起動機能を無効化
@@ -681,6 +681,8 @@ ISC
 
 ## 更新履歴
 
+- **v23.0.0**: 設定画面の導入
+  - 🔧 **設定画面**: `localhost:1900/setting`でアクセスできる設定画面を導入
 - **v22.1.2**: 並列処理性能最適化
   - ⚡ **並列処理制限**: p-limitによる同時実行数制御でメモリ枯渇・CPU過負荷を防止
   - 🔄 **in-flight管理**: 重複変換防止とタイムアウト管理による安定性向上

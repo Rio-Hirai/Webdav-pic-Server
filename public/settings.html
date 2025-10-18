@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WebDAV Server - Settings (フォーム)</title>
+  <style>
+    :root{--bg:#f7f8fa;--card:#fff;--accent:#007acc;--muted:#6c757d;--danger:#d9534f}
+    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","メイリオ",sans-serif;background:var(--bg);margin:0;padding:24px;color:#222}
+    .container{max-width:1100px;margin:0 auto}
+    h1{font-size:20px;margin:0 0 8px}
+    .lead{color:var(--muted);margin-bottom:18px}
+    .grid{display:grid;grid-template-columns:1fr 320px;gap:18px}
+    .card{background:var(--card);padding:16px;border-radius:8px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    form .row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    label{min-width:200px;font-size:14px;color:#333}
+    input[type="text"], input[type="number"], select, textarea{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px}
+    input[type="checkbox"]{transform:scale(1.05);margin-right:8px}
+    .desc{font-size:12px;color:var(--muted);margin-top:4px}
+    .actions{display:flex;gap:8px;align-items:center;margin-top:12px}
+    button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
+    .btn-ghost{background:#eee;color:#111}
+    .status{margin-left:6px;font-size:13px;color:var(--muted)}
+    pre{background:#111;color:#fff;padding:12px;border-radius:6px;overflow:auto;max-height:40vh}
+    .warning{color:var(--danger);font-size:13px}
+    .field-group{border-top:1px dashed #eee;padding-top:12px;margin-top:12px}
+    .small{font-size:13px;color:var(--muted)}
+    .full-width{grid-column:1 / -1}
+    @media(max-width:880px){ .grid{grid-template-columns:1fr} label{min-width:140px} }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WebDAV Server — 設定編集（フォーム）</h1>
+    <div class="lead">フォームで設定を編集できます。各項目の説明を参照の上、編集してください。編集後は <strong>Save</strong> を押して反映します。</div>
+
+    <div class="grid">
+      <div class="card">
+        <form id="settingsForm" autocomplete="off">
+          <div class="field-group">
+            <h3>圧縮設定</h3>
+            <div class="row">
+              <label for="COMPRESSION_ENABLED">COMPRESSION_ENABLED</label>
+              <input id="COMPRESSION_ENABLED" name="COMPRESSION_ENABLED" type="checkbox" />
+            </div>
+            <div class="row">
+              <label for="COMPRESSION_THRESHOLD">COMPRESSION_THRESHOLD</label>
+              <input id="COMPRESSION_THRESHOLD" name="COMPRESSION_THRESHOLD" type="number" step="0.01" min="0" max="1" />
+            </div>
+            <div class="desc">テキストレスポンスを gzip 圧縮するか（true/false）。閾値は圧縮後のサイズ比（0〜1）で指定。</div>
+          </div>
+
+          <div class="field-group">
+            <h3>サーバー設定</h3>
+            <div class="row">
+              <label for="PORT">PORT</label>
+              <input id="PORT" name="PORT" type="number" min="1" max="65535" />
+            </div>
+            <div class="row">
+              <label for="ROOT_PATH">ROOT_PATH</label>
+              <input id="ROOT_PATH" name="ROOT_PATH" type="text" />
+            </div>
+            <div class="row">
+              <label for="MAX_LIST">MAX_LIST</label>
+              <input id="MAX_LIST" name="MAX_LIST" type="number" min="1" />
+            </div>
+            <div class="desc">サーバーの待ち受けポート、WebDAV のルートパス、ディレクトリリストの最大件数。</div>
+          </div>
+
+          <div class="field-group">
+            <h3>画像変換設定</h3>
+            <div class="row">
+              <label for="PHOTO_SIZE">PHOTO_SIZE (px)</label>
+              <input id="PHOTO_SIZE" name="PHOTO_SIZE" type="number" min="16" />
+            </div>
+            <div class="row">
+              <label for="DEFAULT_QUALITY">DEFAULT_QUALITY</label>
+              <input id="DEFAULT_QUALITY" name="DEFAULT_QUALITY" type="number" min="1" max="100" />
+            </div>
+            <div class="row">
+              <label for="IMAGE_MODE">IMAGE_MODE</label>
+              <select id="IMAGE_MODE" name="IMAGE_MODE">
+                <option value="1">1 - 高速</option>
+                <option value="2">2 - バランス</option>
+                <option value="3">3 - 高品質</option>
+              </select>
+            </div>
+            <div class="desc">リサイズ最大ピクセル、デフォルト画質（JPEG 等）、画像処理のモード。</div>
+          </div>
+
+          <div class="field-group">
+            <h3>キャッシュ / メモリ</h3>
+            <div class="row">
+              <label for="CACHE_TTL_MS">CACHE_TTL_MS (ms)</label>
+              <input id="CACHE_TTL_MS" name="CACHE_TTL_MS" type="number" min="0" />
+            </div>
+            <div class="row">
+              <label for="CACHE_MIN_SIZE">CACHE_MIN_SIZE (bytes)</label>
+              <input id="CACHE_MIN_SIZE" name="CACHE_MIN_SIZE" type="number" min="0" />
+            </div>
+            <div class="row">
+              <label for="MAX_CONCURRENCY">MAX_CONCURRENCY</label>
+              <input id="MAX_CONCURRENCY" name="MAX_CONCURRENCY" type="number" min="1" />
+            </div>
+            <div class="row">
+              <label for="SHARP_MEMORY_LIMIT">SHARP_MEMORY_LIMIT (MB)</label>
+              <input id="SHARP_MEMORY_LIMIT" name="SHARP_MEMORY_LIMIT" type="number" min="0" />
+            </div>
+            <div class="row">
+              <label for="SHARP_PIXEL_LIMIT">SHARP_PIXEL_LIMIT</label>
+              <input id="SHARP_PIXEL_LIMIT" name="SHARP_PIXEL_LIMIT" type="number" min="0" />
+            </div>
+            <div class="desc">キャッシュTTL、キャッシュ対象最小サイズ、Sharp の並列/メモリ制限等。</div>
+          </div>
+
+          <div class="field-group">
+            <h3>レート制限</h3>
+            <div class="row">
+              <label for="RATE_LIMIT_ENABLED">RATE_LIMIT_ENABLED</label>
+              <input id="RATE_LIMIT_ENABLED" name="RATE_LIMIT_ENABLED" type="checkbox" />
+            </div>
+            <div class="row">
+              <label for="RATE_LIMIT_REQUESTS">RATE_LIMIT_REQUESTS</label>
+              <input id="RATE_LIMIT_REQUESTS" name="RATE_LIMIT_REQUESTS" type="number" min="0" />
+            </div>
+            <div class="row">
+              <label for="RATE_LIMIT_WINDOW_MS">RATE_LIMIT_WINDOW_MS (ms)</label>
+              <input id="RATE_LIMIT_WINDOW_MS" name="RATE_LIMIT_WINDOW_MS" type="number" min="0" />
+            </div>
+            <div class="row">
+              <label for="RATE_LIMIT_QUEUE_SIZE">RATE_LIMIT_QUEUE_SIZE</label>
+              <input id="RATE_LIMIT_QUEUE_SIZE" name="RATE_LIMIT_QUEUE_SIZE" type="number" min="0" />
+            </div>
+            <div class="desc">大量アクセス対策に関する設定。必要に応じて無効化してください。</div>
+          </div>
+
+          <div class="field-group">
+            <h3>緊急 / スタック / 再起動</h3>
+            <div class="row">
+              <label for="EMERGENCY_DISABLE_RATE_LIMIT">EMERGENCY_DISABLE_RATE_LIMIT</label>
+              <input id="EMERGENCY_DISABLE_RATE_LIMIT" name="EMERGENCY_DISABLE_RATE_LIMIT" type="checkbox" />
+            </div>
+            <div class="row">
+              <label for="STACK_MAX_SIZE">STACK_MAX_SIZE</label>
+              <input id="STACK_MAX_SIZE" name="STACK_MAX_SIZE" type="number" min="1" />
+            </div>
+            <div class="row">
+              <label for="STACK_PROCESSING_DELAY_MS">STACK_PROCESSING_DELAY_MS (ms)</label>
+              <input id="STACK_PROCESSING_DELAY_MS" name="STACK_PROCESSING_DELAY_MS" type="number" min="0" />
+            </div>
+            <div class="row">
+              <label for="RESTART_ENABLED">RESTART_ENABLED</label>
+              <input id="RESTART_ENABLED" name="RESTART_ENABLED" type="checkbox" />
+            </div>
+            <div class="row">
+              <label for="RESTART_TIME">RESTART_TIME (HH:MM)</label>
+              <input id="RESTART_TIME" name="RESTART_TIME" type="text" pattern="^\\d{1,2}:\\d{2}$" />
+            </div>
+            <div class="desc">緊急時のレート制御、スタック設定、自動再起動の有効化および時刻。</div>
+          </div>
+
+          <div class="field-group">
+            <h3>その他</h3></h3>
+            <div class="row">
+              <label for="MAGICK_PATH">MAGICK_PATH</label>
+              <input id="MAGICK_PATH" name="MAGICK_PATH" type="text" />
+            </div>
+            <div class="desc">ImageMagick のコマンド名またはパス（フォールバックで使用）。</div>
+          </div>
+
+          <div class="actions">
+            <button type="button" id="btnLoad" class="btn-ghost">Load</button>
+            <button type="button" id="btnSave">Save</button>
+            <button type="button" id="btnRaw">Toggle Raw</button>
+            <div class="status" id="status"></div>
+          </div>
+
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>項目説明</h3>
+        <div class="small">
+          このパネルでは各設定項目の簡単な説明を表示します。フォームで値を変更して <strong>Save</strong> を押すとサーバ上の <code>config.txt</code> を上書きします。運用中は必ずバックアップを取ってから変更してください。
+        </div>
+
+        <hr style="margin:12px 0" />
+
+        <div id="help" class="small">
+          <strong>COMPRESSION_ENABLED</strong><br/>テキスト系レスポンスの gzip 圧縮を有効にします。<br/><br/>
+          <strong>COMPRESSION_THRESHOLD</strong><br/>圧縮後のサイズ比 (compressed / original)。小さいほど圧縮が適用されやすくなります（例: 0.3）。<br/><br/>
+          <strong>PHOTO_SIZE</strong><br/>画像変換時の最大ピクセル幅/高さ（px）。<br/><br/>
+          <strong>IMAGE_MODE</strong><br/>処理モード。1=高速, 2=バランス, 3=高品質（品質と負荷のトレードオフ）。<br/><br/>
+          <strong>CACHE_TTL_MS</strong><br/>キャッシュの有効期限（ミリ秒）。期限切れのキャッシュは定期的に削除されます。<br/><br/>
+          <strong>SHARP_MEMORY_LIMIT</strong><br/>Sharp のメモリキャッシュ（MB）。システムの物理メモリに合わせて調整してください。<br/><br/>
+          <strong>RATE_LIMIT_*</strong><br/>大量アクセス対策の設定（許可リクエスト数、ウィンドウ時間、キュー長など）。<br/>
+        </div>
+
+        <hr style="margin:12px 0" />
+
+        <div>
+          <h4>Raw content</h4>
+          <pre id="raw" style="display:none">読み込みしてください</pre>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // mapping between form fields and config keys
+    const keys = [
+      'COMPRESSION_ENABLED','COMPRESSION_THRESHOLD',
+      'PORT','ROOT_PATH','MAX_LIST',
+      'PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE',
+      'CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT',
+      'RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE',
+      'EMERGENCY_DISABLE_RATE_LIMIT','STACK_MAX_SIZE','STACK_PROCESSING_DELAY_MS',
+      'RESTART_ENABLED','RESTART_TIME','MAGICK_PATH'
+    ];
+
+    // convenience helpers
+    const byId = id => document.getElementById(id);
+    const statusEl = byId('status');
+    const rawEl = byId('raw');
+
+    function setStatus(msg, err) {
+      if (!statusEl) return;
+      statusEl.textContent = msg || '';
+      statusEl.style.color = err ? 'var(--danger)' : '';
+    }
+
+    // parse config.txt into object {KEY: value}
+    function parseConfig(text) {
+      const out = {};
+      const lines = text.split(/\r?\n/);
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        const idx = t.indexOf('=');
+        if (idx === -1) continue;
+        const k = t.slice(0, idx).trim();
+        let v = t.slice(idx+1).trim();
+        // keep as string; we'll interpret booleans/numbers in UI logic
+        out[k] = v;
+      }
+      return out;
+    }
+
+    // populate form from config object
+    function populateForm(cfg) {
+      for (const k of keys) {
+        const el = byId(k);
+        if (!el) continue;
+        const v = cfg[k];
+        if (el.type === 'checkbox') {
+          el.checked = (typeof v !== 'undefined') ? (String(v).toLowerCase() === 'true') : false;
+        } else {
+          el.value = (typeof v !== 'undefined') ? v : '';
+        }
+      }
+      // show raw
+      buildRaw();
+    }
+
+    // build raw config text from form values (with comments/header)
+    function buildConfigText() {
+      const header = [
+        '# WebDAV画像変換サーバー設定ファイル (自動生成)',
+        '# 編集はフォームで行ってください。'
+      ];
+      const lines = [...header];
+      // group order similar to original file
+      const add = (k) => {
+        const el = byId(k);
+        if (!el) return;
+        let v;
+        if (el.type === 'checkbox') v = el.checked ? 'true' : 'false';
+        else v = el.value ?? '';
+        lines.push(`${k}=${v}`);
+      };
+      const groups = [
+        ['COMPRESSION_ENABLED','COMPRESSION_THRESHOLD'],
+        ['PORT','ROOT_PATH','MAX_LIST'],
+        ['PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE'],
+        ['CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT'],
+        ['RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE'],
+        ['EMERGENCY_DISABLE_RATE_LIMIT'],
+        ['STACK_MAX_SIZE','STACK_PROCESSING_DELAY_MS'],
+        ['RESTART_ENABLED','RESTART_TIME'],
+        ['MAGICK_PATH']
+      ];
+      for (const g of groups) {
+        lines.push(''); // blank line between groups
+        for (const k of g) add(k);
+      }
+      return lines.join('\n') + '\n';
+    }
+
+    // build raw preview
+    function buildRaw() {
+      if (!rawEl) return;
+      rawEl.textContent = buildConfigText();
+    }
+
+    // validate simple constraints, returns {ok:bool, msg:...}
+    function validate() {
+      // example: port range
+      const port = Number(byId('PORT').value || 0);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return {ok:false,msg:'PORT は 1..65535 の整数で指定してください'};
+      const q = Number(byId('DEFAULT_QUALITY').value || 0);
+      if (!Number.isFinite(q) || q < 1 || q > 100) return {ok:false,msg:'DEFAULT_QUALITY は 1..100 で指定してください'};
+      const pct = Number(byId('COMPRESSION_THRESHOLD').value || -1);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 1) return {ok:false,msg:'COMPRESSION_THRESHOLD は 0.0 〜 1.0 の値で指定してください'};
+      return {ok:true};
+    }
+
+    // fetch config.txt content
+    async function loadConfig() {
+      setStatus('Loading...');
+      try {
+        const r = await fetch('/setting/data');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        const txt = j.content || '';
+        byId('status').textContent = '';
+        const cfg = parseConfig(txt);
+        populateForm(cfg);
+        setStatus('Loaded');
+      } catch (e) {
+        setStatus('Load error: ' + (e.message || e), true);
+      }
+    }
+
+    // save config: build text and POST
+    async function saveConfig() {
+      setStatus('Validating...');
+      const v = validate();
+      if (!v.ok) { setStatus(v.msg, true); return; }
+      const text = buildConfigText();
+      // show raw preview before saving
+      rawEl.textContent = text;
+      setStatus('Saving...');
+      try {
+        const r = await fetch('/setting/save', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ content: text })
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        setStatus('Saved');
+      } catch (e) {
+        setStatus('Save error: ' + (e.message || e), true);
+      }
+    }
+
+    // event wiring
+    document.getElementById('btnLoad').addEventListener('click', loadConfig);
+    document.getElementById('btnSave').addEventListener('click', () => {
+      saveConfig();
+    });
+    document.getElementById('btnRaw').addEventListener('click', () => {
+      rawEl.style.display = rawEl.style.display === 'none' ? 'block' : 'none';
+    });
+
+    // initialize
+    (function init(){
+      // set some defaults
+      for (const k of keys) {
+        const el = byId(k);
+        if (!el) continue;
+        if (el.type === 'checkbox') el.checked = false;
+        else el.value = '';
+      }
+      loadConfig();
+    })();
+  </script>
+</body>
+</html>

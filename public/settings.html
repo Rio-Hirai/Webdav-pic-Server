@@ -4,35 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>WebDAV Server - Settings (フォーム)</title>
-  <style>
-    :root{--bg:#f7f8fa;--card:#fff;--accent:#007acc;--muted:#6c757d;--danger:#d9534f}
-    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","メイリオ",sans-serif;background:var(--bg);margin:0;padding:24px;color:#222}
-    .container{max-width:1100px;margin:0 auto}
-    h1{font-size:20px;margin:0 0 8px}
-    .lead{color:var(--muted);margin-bottom:18px}
-    .grid{display:grid;grid-template-columns:1fr 320px;gap:18px}
-    .card{background:var(--card);padding:16px;border-radius:8px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-    form .row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
-    label{min-width:200px;font-size:14px;color:#333}
-    input[type="text"], input[type="number"], select, textarea{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px}
-    input[type="checkbox"]{transform:scale(1.05);margin-right:8px}
-    .desc{font-size:12px;color:var(--muted);margin-top:4px}
-    .actions{display:flex;gap:8px;align-items:center;margin-top:12px}
-    button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
-    .btn-ghost{background:#eee;color:#111}
-    .status{margin-left:6px;font-size:13px;color:var(--muted)}
-    pre{background:#111;color:#fff;padding:12px;border-radius:6px;overflow:auto;max-height:40vh}
-    .warning{color:var(--danger);font-size:13px}
-    .field-group{border-top:1px dashed #eee;padding-top:12px;margin-top:12px}
-    .small{font-size:13px;color:var(--muted)}
-    .full-width{grid-column:1 / -1}
-    @media(max-width:880px){ .grid{grid-template-columns:1fr} label{min-width:140px} }
-  </style>
+  <link rel="stylesheet" href="/setting/css/settings.css">
 </head>
 <body>
   <div class="container">
     <h1>WebDAV Server — 設定編集</h1>
-    <div class="lead">フォームで設定を編集できます。各項目の説明を参照の上、編集してください。編集後は <strong>保存</strong> を押して反映します。</div>
+  <div class="header-row">
+      <div class="lead">フォームで設定を編集できます。各項目の説明を参照の上、編集してください。編集後は <strong>保存</strong> を押して反映します。</div>
+      <div class="header-actions">
+        <button id="themeToggle" class="btn-ghost" type="button">ダーク</button>
+      </div>
+    </div>
 
     <div class="grid">
       <div class="card">
@@ -40,138 +22,148 @@
           <div class="field-group">
             <h3>圧縮設定</h3>
             <div class="row">
-              <label for="COMPRESSION_ENABLED">COMPRESSION_ENABLED</label>
+              <label for="COMPRESSION_ENABLED">レスポンス圧縮を有効にする</label>
               <input id="COMPRESSION_ENABLED" name="COMPRESSION_ENABLED" type="checkbox" />
             </div>
             <div class="row">
-              <label for="COMPRESSION_THRESHOLD">COMPRESSION_THRESHOLD</label>
+              <label for="COMPRESSION_THRESHOLD">圧縮閾値 (0.0〜1.0)</label>
               <input id="COMPRESSION_THRESHOLD" name="COMPRESSION_THRESHOLD" type="number" step="0.01" min="0" max="1" />
             </div>
-            <div class="desc">テキストレスポンスを gzip 圧縮するか（true/false）。閾値は圧縮後のサイズ比（0〜1）で指定。</div>
+            <div class="desc">テキスト系レスポンスを gzip 圧縮するか。閾値は圧縮後サイズ ÷ 元のサイズ（小さいほど圧縮が適用されやすい）。</div>
           </div>
 
           <div class="field-group">
             <h3>サーバー設定</h3>
             <div class="row">
-              <label for="PORT">PORT</label>
+              <label for="PORT">待ち受けポート</label>
               <input id="PORT" name="PORT" type="number" min="1" max="65535" />
             </div>
             <div class="row">
-              <label for="ROOT_PATH">ROOT_PATH</label>
+              <label for="ROOT_PATH">WebDAV ルートパス</label>
               <input id="ROOT_PATH" name="ROOT_PATH" type="text" />
             </div>
             <div class="row">
-              <label for="MAX_LIST">MAX_LIST</label>
+              <label for="MAX_LIST">ディレクトリ一覧の最大件数</label>
               <input id="MAX_LIST" name="MAX_LIST" type="number" min="1" />
             </div>
-            <div class="desc">サーバーの待ち受けポート、WebDAV のルートパス、ディレクトリリストの最大件数。</div>
+            <div class="desc">サーバーの待ち受けポート、WebDAV のルートフォルダ、ディレクトリ一覧で表示する最大件数を指定します。</div>
           </div>
 
           <div class="field-group">
             <h3>画像変換設定</h3>
             <div class="row">
-              <label for="PHOTO_SIZE">PHOTO_SIZE (px)</label>
+              <label for="IMAGE_TEMPLATE">テンプレート選択</label>
+              <select id="IMAGE_TEMPLATE" name="IMAGE_TEMPLATE">
+                <option value="">テンプレートを選択しない</option>
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+                <option value="hq">High Quality</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="PHOTO_SIZE">画像最大サイズ (px)</label>
               <input id="PHOTO_SIZE" name="PHOTO_SIZE" type="number" min="16" />
             </div>
             <div class="row">
-              <label for="DEFAULT_QUALITY">DEFAULT_QUALITY</label>
+              <label for="DEFAULT_QUALITY">デフォルト画質</label>
               <input id="DEFAULT_QUALITY" name="DEFAULT_QUALITY" type="number" min="1" max="100" />
             </div>
             <div class="row">
-              <label for="IMAGE_MODE">IMAGE_MODE</label>
+              <label for="IMAGE_MODE">画像処理モード</label>
               <select id="IMAGE_MODE" name="IMAGE_MODE">
-                <option value="1">1 - 高速</option>
-                <option value="2">2 - バランス</option>
-                <option value="3">3 - 高品質</option>
+                <option value="1">1 — 高速（低負荷）</option>
+                <option value="2">2 — バランス（推奨）</option>
+                <option value="3">3 — 高品質（高負荷）</option>
               </select>
             </div>
-            <div class="desc">リサイズ最大ピクセル、デフォルト画質（JPEG 等）、画像処理のモード。</div>
+            <div class="desc">画像のリサイズ上限(px)、デフォルトの出力品質（JPEG 等）、処理モードを設定します。</div>
           </div>
 
           <div class="field-group">
             <h3>キャッシュ / メモリ</h3>
             <div class="row">
-              <label for="CACHE_TTL_MS">CACHE_TTL_MS (ms)</label>
+              <label for="CACHE_TTL_MS">キャッシュ有効期限 (ms)</label>
               <input id="CACHE_TTL_MS" name="CACHE_TTL_MS" type="number" min="0" />
             </div>
             <div class="row">
-              <label for="CACHE_MIN_SIZE">CACHE_MIN_SIZE (bytes)</label>
+              <label for="CACHE_MIN_SIZE">キャッシュ対象最小サイズ (bytes)</label>
               <input id="CACHE_MIN_SIZE" name="CACHE_MIN_SIZE" type="number" min="0" />
             </div>
             <div class="row">
-              <label for="MAX_CONCURRENCY">MAX_CONCURRENCY</label>
+              <label for="MAX_CONCURRENCY">同時処理数の上限</label>
               <input id="MAX_CONCURRENCY" name="MAX_CONCURRENCY" type="number" min="1" />
             </div>
             <div class="row">
-              <label for="SHARP_MEMORY_LIMIT">SHARP_MEMORY_LIMIT (MB)</label>
+              <label for="SHARP_MEMORY_LIMIT">Sharp メモリ制限 (MB)</label>
               <input id="SHARP_MEMORY_LIMIT" name="SHARP_MEMORY_LIMIT" type="number" min="0" />
             </div>
             <div class="row">
-              <label for="SHARP_PIXEL_LIMIT">SHARP_PIXEL_LIMIT</label>
+              <label for="SHARP_PIXEL_LIMIT">Sharp ピクセル上限</label>
               <input id="SHARP_PIXEL_LIMIT" name="SHARP_PIXEL_LIMIT" type="number" min="0" />
             </div>
-            <div class="desc">キャッシュTTL、キャッシュ対象最小サイズ、Sharp の並列/メモリ制限等。</div>
+            <div class="desc">画像変換キャッシュの設定や Sharp ライブラリのメモリ・処理上限を調整します。</div>
           </div>
 
           <div class="field-group">
             <h3>レート制限</h3>
             <div class="row">
-              <label for="RATE_LIMIT_ENABLED">RATE_LIMIT_ENABLED</label>
+              <label for="RATE_LIMIT_ENABLED">レート制限を有効にする</label>
               <input id="RATE_LIMIT_ENABLED" name="RATE_LIMIT_ENABLED" type="checkbox" />
             </div>
             <div class="row">
-              <label for="RATE_LIMIT_REQUESTS">RATE_LIMIT_REQUESTS</label>
+              <label for="RATE_LIMIT_REQUESTS">許可リクエスト数 / ウィンドウ時間</label>
               <input id="RATE_LIMIT_REQUESTS" name="RATE_LIMIT_REQUESTS" type="number" min="0" />
             </div>
             <div class="row">
-              <label for="RATE_LIMIT_WINDOW_MS">RATE_LIMIT_WINDOW_MS (ms)</label>
+              <label for="RATE_LIMIT_WINDOW_MS">ウィンドウ時間 (ms)</label>
               <input id="RATE_LIMIT_WINDOW_MS" name="RATE_LIMIT_WINDOW_MS" type="number" min="0" />
             </div>
             <div class="row">
-              <label for="RATE_LIMIT_QUEUE_SIZE">RATE_LIMIT_QUEUE_SIZE</label>
+              <label for="RATE_LIMIT_QUEUE_SIZE">レート制限キューサイズ</label>
               <input id="RATE_LIMIT_QUEUE_SIZE" name="RATE_LIMIT_QUEUE_SIZE" type="number" min="0" />
             </div>
-            <div class="desc">大量アクセス対策に関する設定。必要に応じて無効化してください。</div>
+            <div class="desc">大量アクセス対策の設定です。負荷状況に応じて調整してください。</div>
           </div>
 
           <div class="field-group">
             <h3>緊急 / スタック / 再起動</h3>
             <div class="row">
-              <label for="EMERGENCY_DISABLE_RATE_LIMIT">EMERGENCY_DISABLE_RATE_LIMIT</label>
+              <label for="EMERGENCY_DISABLE_RATE_LIMIT">緊急時にレート制限を無効化する</label>
               <input id="EMERGENCY_DISABLE_RATE_LIMIT" name="EMERGENCY_DISABLE_RATE_LIMIT" type="checkbox" />
             </div>
             <div class="row">
-              <label for="STACK_MAX_SIZE">STACK_MAX_SIZE</label>
+              <label for="STACK_MAX_SIZE">スタック最大サイズ</label>
               <input id="STACK_MAX_SIZE" name="STACK_MAX_SIZE" type="number" min="1" />
             </div>
             <div class="row">
-              <label for="STACK_PROCESSING_DELAY_MS">STACK_PROCESSING_DELAY_MS (ms)</label>
+              <label for="STACK_PROCESSING_DELAY_MS">スタック処理遅延 (ms)</label>
               <input id="STACK_PROCESSING_DELAY_MS" name="STACK_PROCESSING_DELAY_MS" type="number" min="0" />
             </div>
             <div class="row">
-              <label for="RESTART_ENABLED">RESTART_ENABLED</label>
+              <label for="RESTART_ENABLED">自動再起動を有効にする</label>
               <input id="RESTART_ENABLED" name="RESTART_ENABLED" type="checkbox" />
             </div>
             <div class="row">
-              <label for="RESTART_TIME">RESTART_TIME (HH:MM)</label>
+              <label for="RESTART_TIME">自動再起動時刻 (HH:MM)</label>
               <input id="RESTART_TIME" name="RESTART_TIME" type="text" pattern="^\\d{1,2}:\\d{2}$" />
             </div>
-            <div class="desc">緊急時のレート制御、スタック設定、自動再起動の有効化および時刻。</div>
+            <div class="desc">緊急時の動作やスタック処理、定期的な自動再起動の設定を行います。</div>
           </div>
 
           <div class="field-group">
-            <h3>その他</h3></h3>
+            <h3>その他</h3>
             <div class="row">
-              <label for="MAGICK_PATH">MAGICK_PATH</label>
+              <label for="MAGICK_PATH">ImageMagick コマンド / パス</label>
               <input id="MAGICK_PATH" name="MAGICK_PATH" type="text" />
             </div>
-            <div class="desc">ImageMagick のコマンド名またはパス（フォールバックで使用）。</div>
+            <div class="desc">ImageMagick を使用する場合のコマンド名またはフルパス。未設定時は既定のコマンド名を使用します。</div>
           </div>
 
           <div class="actions">
             <button type="button" id="btnLoad" class="btn-ghost">再読み込み</button>
             <button type="button" id="btnSave">保存</button>
-            <button type="button" id="btnRaw">Toggle Raw</button>
+            <button type="button" id="btnRaw">生データ表示切替</button>
             <div class="status" id="status"></div>
           </div>
 
@@ -184,7 +176,7 @@
           このパネルでは各設定項目の簡単な説明を表示します。フォームで値を変更して <strong>Save</strong> を押すとサーバ上の <code>config.txt</code> を上書きします。運用中は必ずバックアップを取ってから変更してください。
         </div>
 
-        <hr style="margin:12px 0" />
+  <hr />
 
         <div id="help" class="small">
           <strong>COMPRESSION_ENABLED</strong><br/>テキスト系レスポンスの gzip 圧縮を有効にします。<br/><br/>
@@ -196,14 +188,23 @@
           <strong>RATE_LIMIT_*</strong><br/>大量アクセス対策の設定（許可リクエスト数、ウィンドウ時間、キュー長など）。<br/>
         </div>
 
-        <hr style="margin:12px 0" />
+  <hr />
 
         <div>
           <h4>Raw content</h4>
-          <pre id="raw" style="display:none">読み込みしてください</pre>
+          <pre id="raw" tabindex="0" role="region" aria-label="設定ファイルの生テキスト">読み込みしてください</pre>
         </div>
 
       </div>
+    </div>
+  </div>
+
+  <!-- fixed save bar -->
+  <div id="fixedBar" class="fixed-bar" aria-hidden="false">
+    <div class="fixed-bar-inner">
+      <button id="btnLoadFixed" class="btn-ghost" type="button">再読み込み</button>
+      <button id="btnSaveFixed" class="btn-primary" type="button">保存</button>
+      <div class="status" id="statusFixed"></div>
     </div>
   </div>
 
@@ -223,6 +224,30 @@
     const byId = id => document.getElementById(id);
     const statusEl = byId('status');
     const rawEl = byId('raw');
+    const themeBtn = byId('themeToggle');
+
+    // Theme helpers: apply and persist theme (light/dark)
+    function applyTheme(theme){
+      if (theme === 'dark') document.documentElement.setAttribute('data-theme','dark');
+      else document.documentElement.removeAttribute('data-theme');
+      if (themeBtn) themeBtn.textContent = theme === 'dark' ? 'ライト' : 'ダーク';
+    }
+
+    function loadTheme(){
+      try {
+        const t = localStorage.getItem('settings_theme') || 'light';
+        applyTheme(t);
+      } catch(e){}
+    }
+
+    function toggleTheme(){
+      try{
+        const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        const next = current === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('settings_theme', next);
+        applyTheme(next);
+      }catch(e){}
+    }
 
     function setStatus(msg, err) {
       if (!statusEl) return;
@@ -362,6 +387,7 @@
     document.getElementById('btnRaw').addEventListener('click', () => {
       rawEl.style.display = rawEl.style.display === 'none' ? 'block' : 'none';
     });
+    if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
 
     // initialize
     (function init(){
@@ -373,6 +399,42 @@
         else el.value = '';
       }
       loadConfig();
+      loadTheme();
+      // wire template selector
+      const templateSelect = byId('IMAGE_TEMPLATE');
+      const templates = {
+        small: { PHOTO_SIZE: '640', DEFAULT_QUALITY: '30', IMAGE_MODE: '1' },
+        medium: { PHOTO_SIZE: '800', DEFAULT_QUALITY: '50', IMAGE_MODE: '2' },
+        large: { PHOTO_SIZE: '1280', DEFAULT_QUALITY: '70', IMAGE_MODE: '2' },
+        hq: { PHOTO_SIZE: '2400', DEFAULT_QUALITY: '95', IMAGE_MODE: '3' }
+      };
+      if (templateSelect) {
+        templateSelect.addEventListener('change', (ev) => {
+          const v = ev.target.value;
+          if (!v) return; // no-op when clearing
+          const t = templates[v];
+          if (!t) return;
+          // apply template values to form fields
+          for (const k of Object.keys(t)) {
+            const el = byId(k);
+            if (!el) continue;
+            el.value = t[k];
+          }
+        });
+      }
+
+      // wire fixed bar buttons (if present)
+      const btnSaveFixed = byId('btnSaveFixed');
+      const btnLoadFixed = byId('btnLoadFixed');
+      const statusFixed = byId('statusFixed');
+      if (btnSaveFixed) btnSaveFixed.addEventListener('click', () => saveConfig());
+      if (btnLoadFixed) btnLoadFixed.addEventListener('click', () => loadConfig());
+      // keep status in sync
+      const origSetStatus = setStatus;
+      setStatus = (msg, err) => {
+        origSetStatus(msg, err);
+        if (statusFixed) statusFixed.textContent = msg || '';
+      };
     })();
   </script>
 </body>

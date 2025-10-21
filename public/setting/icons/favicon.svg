@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300" role="img" aria-labelledby="title desc">
+  <title id="title">Settings Icon (Gear with Verified Config)</title>
+  <desc id="desc">A gear with eight teeth and a rounded square containing a checkmark, suitable for an app settings screen. Transparent background.</desc>
+  <defs>
+    <style>
+      :root {
+        --gear-fill: #2F343C;    /* deep gray */
+        --panel-fill: #F6F8FA;   /* light panel for contrast */
+        --panel-stroke: #3A78B4; /* calm blue accent */
+        --check-stroke: #3A78B4; /* same blue */
+      }
+      .gear { fill: var(--gear-fill); fill-rule: evenodd; }
+      .panel { fill: var(--panel-fill); stroke: var(--panel-stroke); stroke-width: 6; }
+      .check { fill: none; stroke: var(--check-stroke); stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <!-- Gear -->
+  <path class="gear" d="M 270.00,150.00 L 235.00,185.21 L 234.85,234.85 L 185.21,235.00 L 150.00,270.00 L 114.79,235.00 L 65.15,234.85 L 65.00,185.21 L 30.00,150.00 L 65.00,114.79 L 65.15,65.15 L 114.79,65.00 L 150.00,30.00 L 185.21,65.00 L 234.85,65.15 L 235.00,114.79 Z M 206.00,150.00 C 206.00,180.93 180.93,206.00 150.00,206.00 C 119.07,206.00 94.00,180.93 94.00,150.00 C 94.00,119.07 119.07,94.00 150.00,94.00 C 180.93,94.00 206.00,119.07 206.00,150.00 Z"/>
+
+  <!-- Rounded square panel -->
+  <path class="panel" d="M 119.00,105.00 H 181.00 A 14,14 0 0 1 195.00,119.00 V 181.00 A 14,14 0 0 1 181.00,195.00 H 119.00 A 14,14 0 0 1 105.00,181.00 V 119.00 A 14,14 0 0 1 119.00,105.00 Z"/>
+
+  <!-- Checkmark -->
+  <path class="check" d="M 130.00,160.00 L 148.00,178.00 L 178.00,138.00"/>
+</svg>

@@ -1,30 +1,52 @@
 /* Styles extracted from settings.html */
 :root{--bg:#f7f8fa;--card:#fff;--accent:#007acc;--muted:#6c757d;--danger:#d9534f;--text:#222;--pre-bg:#0f1720;--pre-color:#e6eef6;--input-border:#ddd;--ghost-bg:#eee}
+/* Toggle/switch color variables: use theme-aware tokens */
+:root{--switch-off-bg:var(--ghost-bg);--switch-on-bg:var(--accent);--switch-knob:#ffffff}
 .container{max-width:980px;margin:0 auto}
 /* make sizing predictable so padding doesn't cause overflow */
 *, *:before, *:after { box-sizing: border-box; }
 
-/* ensure content isn't hidden behind the fixed bar */
-.container{padding-bottom:84px}
+/* ensure content isn't hidden behind the fixed bar: reserve space equal to bar height */
+.container{padding-bottom:140px}
 
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","メイリオ",sans-serif;background:var(--bg);margin:0;padding:24px;color:var(--text)}
 h1{font-size:20px;margin:0 0 8px}
 .lead{color:var(--muted);margin-bottom:18px}
 .grid{display:grid;grid-template-columns:1fr 320px;gap:18px}
 .card{background:var(--card);padding:16px;border-radius:8px;box-shadow:0 1px 2px rgba(0,0,0,.04);overflow:hidden}
+/* ensure card content defaults to left alignment */
+.card { text-align: left !important; }
 form .row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
-label{min-width:200px;font-size:14px;color:var(--text)}
+label{min-width:240px;font-size:16px;color:var(--text);text-align:left !important}
+.card label { text-align: left !important; display: inline-block; }
 /* wrapper for input/control so we can constrain width without losing flex behavior */
-.field-control{flex:1;display:flex}
+.field-control{flex:1;display:flex;align-items:center;gap:8px}
+/* range slider styles inside field-control */
+.field-control input[type="range"]{flex:1;margin-right:8px;min-width:80px;max-width:190px}
+.field-control output{min-width:56px;text-align:right;font-variant-numeric:tabular-nums;padding:6px 8px;border-radius:6px;background:transparent;border:1px solid transparent;color:var(--text)}
 input[type="text"], input[type="number"], select, textarea{flex:1;padding:8px;border:1px solid var(--input-border);border-radius:6px;font-size:14px;color:var(--text);background:transparent;max-width:560px}
 
 /* narrower variant for compact fields */
 .field-control.compact input[type="text"], .field-control.compact input[type="number"]{max-width:240px}
-input[type="checkbox"]{transform:scale(1.05);margin-right:8px}
-.desc{font-size:12px;color:var(--muted);margin-top:4px}
+/* normalize checkbox size and alignment to avoid baseline/vertical-shift issues */
+input[type="checkbox"]{
+	/* explicit size so different browsers render consistently */
+	width:18px;height:18px;-webkit-appearance:checkbox;appearance:auto;
+	margin:0 8px; /* keep horizontal spacing */
+	vertical-align:middle;transform-origin:center center; /* avoid scale-based shifts */
+}
+.desc{font-size:12px;color:var(--muted);margin-top:4px;text-align:left !important}
 .actions{display:flex;gap:8px;align-items:center;margin-top:12px}
 button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
-.btn-ghost{background:var(--ghost-bg);color:var(--text);border:1px solid transparent}
+.btn-primary{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
+.btn-ghost{background:var(--ghost-bg);color:var(--text);border:1px solid transparent;cursor:pointer}
+/* ghost button hover/focus for visibility and accessibility */
+.btn-primary:hover, .btn-primary:focus { background: color-mix(in srgb, var(--accent) 85%, black 15%); box-shadow: 0 4px 12px rgba(0,0,0,0.12); outline: none; }
+.btn-ghost:hover, .btn-ghost:focus { border-color: rgba(0,0,0,0.12); outline: none; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+.fixed-bar .btn-ghost:hover, .fixed-bar .btn-ghost:focus { border-color: rgba(0,0,0,0.12); box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+
+/* disabled appearance */
+.btn-primary[disabled], .btn-ghost[disabled], button[disabled] { opacity: 0.55; cursor: not-allowed; filter: grayscale(8%); }
 .status{margin-left:6px;font-size:13px;color:var(--muted)}
 /* improved pre/code styles for readability and accessibility */
 pre{
@@ -44,7 +66,13 @@ pre:focus{ outline: 3px solid rgba(77,163,255,0.35); outline-offset:2px; }
 code{ background: rgba(255,255,255,0.03); padding:2px 6px; border-radius:4px; font-family: inherit; }
 .warning{color:var(--danger);font-size:13px}
 .field-group{border-top:1px dashed #eee;padding-top:12px;margin-top:12px}
-.small{font-size:13px;color:var(--muted)}
+.small{font-size:13px;color:var(--muted);text-align:left !important}
+
+/* ensure top-level containers are left-aligned */
+.container, body { text-align: left !important; }
+
+/* ensure lead/intro text and headings align left */
+.lead, .card h3 { text-align: left; }
 .full-width{grid-column:1 / -1}
 @media(max-width:880px){ .grid{grid-template-columns:1fr} label{min-width:140px} }
 
@@ -52,9 +80,18 @@ code{ background: rgba(255,255,255,0.03); padding:2px 6px; border-radius:4px; fo
 @media (max-width:600px) {
 	body { padding: 12px; }
 	.container { padding: 0 6px; }
-	/* stack label above input for easier reading */
-	form .row { flex-direction: column; align-items: stretch; gap: 6px; }
-	label { min-width: 0; width: 100%; font-size: 15px; }
+	/* ensure there's ample bottom spacing on small screens where fixed bar may be taller */
+	.container { padding-bottom: 50px; }
+	/* stack label above input for easier reading (exclude checkbox rows so they remain horizontal) */
+	form .row:not(.checkbox-row) { flex-direction: column; align-items: stretch; gap: 6px; }
+	/* ensure non-checkbox rows stack and align to start */
+	form .row:not(.checkbox-row) { flex-direction: column; align-items: flex-start !important; gap: 6px; }
+	/* apply full-width labels only to non-checkbox rows */
+	form .row:not(.checkbox-row) label { min-width: 0; width: 100%; font-size: 17px; text-align: left !important; display: block !important; }
+
+	/* ensure checkbox-row labels match the global label size on mobile */
+	.row.checkbox-row label { font-size: 17px !important; font-weight: normal; line-height: 1.3 !important; }
+	.row:not(.checkbox-row) > label { align-self: flex-start !important; }
 	input[type="text"], input[type="number"], select, textarea { width: 100%; }
 	.actions { flex-direction: column; align-items: stretch; }
 	.actions button, .actions .btn-ghost { width: 100%; padding: 12px; font-size: 15px; box-sizing: border-box; }
@@ -62,6 +99,39 @@ code{ background: rgba(255,255,255,0.03); padding:2px 6px; border-radius:4px; fo
 	.header-actions { width: 100%; display:flex; justify-content: flex-end; flex-wrap:wrap; gap:8px }
 	.card { padding: 12px; }
 	pre { font-size: 12px; padding: 10px; }
+
+	/* keep checkboxes visually on the right on mobile */
+	.row.checkbox-row { display:flex; align-items:center; justify-content:space-between; }
+	.row.checkbox-row label { width:auto; margin-right:8px; text-align:left !important; }
+	/* Place the checkbox control at the end (right side) of the row */
+	.row.checkbox-row input[type="checkbox"] { order: 2; margin-left:8px; margin-right:0; margin-top:0; align-self:center; vertical-align:middle; transform-origin:center center; }
+	/* helper class to nudge checkbox vertically when needed: add .checkbox-nudge to the row and adjust --chk-nudge */
+	.row.checkbox-row { --chk-nudge: 0px; }
+	.row.checkbox-row input[type="checkbox"].nudge { transform: translateY(var(--chk-nudge)); }
+	/* If you want the checkbox centered horizontally instead, add the helper class `.checkbox-center` to the row. */
+	.row.checkbox-row.checkbox-center { justify-content:center; }
+	.row.checkbox-row.checkbox-center label { margin-right:12px; }
+
+	/* make the compression slider longer on mobile: fill the available control column */
+	.field-control input[type="range"]{ width:100%; max-width:100%; min-width:260px; }
+}
+
+/* Desktop: ensure checkbox rows align their control column with other inputs
+   so the left edge of checkboxes lines up with text/number/select inputs. */
+@media (min-width:601px) {
+	.row.checkbox-row { justify-content:flex-start; }
+	/* ensure checkbox row labels reserve the same min width as other labels */
+	.row.checkbox-row > label { min-width:240px; }
+	/* place checkbox right after label, same alignment as other controls */
+	.row.checkbox-row input[type="checkbox"] { order: 0; margin-left:8px; margin-right:0; }
+
+	/* switch desktop rows to a grid so control columns align exactly */
+	form .row { display: grid; grid-template-columns: 240px 1fr; align-items: center; gap: 8px; }
+	/* ensure checkbox sits at the start of the control column (no extra offset) */
+	/* make the control wrapper stretch to fill the control column so range slider can be long */
+	form .row .field-control { justify-self: stretch; }
+	form .row input, form .row select, form .row textarea { justify-self: start; }
+	.row.checkbox-row input[type="checkbox"] { margin-left:0; justify-self:start; }
 }
 
 /* moved from inline attributes in settings.html */
@@ -81,9 +151,12 @@ hr { margin: 12px 0; }
 	--pre-bg: #0b0f14;
 	--pre-color: #e6eef6;
 	/* input and ghost button adjustments for dark */
-	--input-border: rgba(255,255,255,0.06);
-	--ghost-bg: rgba(255,255,255,0.03);
+	--input-border: rgba(255,255,255,0.12); /* stronger border for visibility */
+	--ghost-bg: rgba(255,255,255,0.06); /* slightly brighter ghost background */
 }
+
+/* override switch vars for dark theme if necessary (keep knob light for contrast) */
+:root[data-theme="dark"]{ --switch-off-bg: var(--ghost-bg); --switch-on-bg: var(--accent); --switch-knob: #ffffff }
 
 /* simple transition for theme change */
 body, .card, pre { transition: background-color 220ms ease, color 220ms ease, box-shadow 220ms ease; }
@@ -98,14 +171,19 @@ body, .card, pre { transition: background-color 220ms ease, color 220ms ease, bo
 .no-margin{margin:0}
 
 /* fixed save bar */
-.fixed-bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);box-shadow:0 -6px 18px rgba(0,0,0,0.08);padding:10px 12px;z-index:60}
+.fixed-bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);box-shadow:0 -6px 18px rgba(0,0,0,0.08);padding:10px 12px;z-index:70}
 .fixed-bar-inner{max-width:980px;margin:0 auto;display:flex;gap:8px;align-items:center;justify-content:flex-end}
 .fixed-bar .btn-primary{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:6px}
 .fixed-bar .btn-ghost{background:var(--ghost-bg);color:var(--text);border:1px solid transparent}
 .fixed-bar .status{margin-left:10px;color:var(--muted)}
 
+/* pin the theme toggle to the right edge of the fixed bar */
+.fixed-bar #themeToggle { margin-left: auto; }
+
 @media (max-width:600px){
 	.fixed-bar-inner{padding:0 6px;gap:6px}
 	.fixed-bar .btn-primary{flex:1}
 	.fixed-bar .btn-ghost{flex:1}
+	/* Narrow the theme toggle button slightly on small screens so it doesn't span full width */
+	.fixed-bar #themeToggle{ flex: 0 0 auto; min-width: 60px; max-width: 100px; padding: 10px 12px; }
 }

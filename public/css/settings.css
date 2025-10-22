@@ -1,57 +1,139 @@
-/* Styles extracted from settings.html */
+/* settings.html から抽出されたスタイル */
+/* CSS カスタムプロパティ（CSS変数）の定義
+   - テーマ対応の色設定を一元管理
+   - ライト/ダークテーマの切り替えに対応 */
 :root{--bg:#f7f8fa;--card:#fff;--accent:#007acc;--muted:#6c757d;--danger:#d9534f;--text:#222;--pre-bg:#0f1720;--pre-color:#e6eef6;--input-border:#ddd;--ghost-bg:#eee}
-/* Toggle/switch color variables: use theme-aware tokens */
+/* トグル/スイッチの色変数: テーマ対応トークンを使用 */
+/* カスタムトグルスイッチの色設定
+   - オフ状態: ゴースト背景色を使用
+   - オン状態: アクセント色を使用
+   - ノブ: 常に白色でコントラストを確保 */
 :root{--switch-off-bg:var(--ghost-bg);--switch-on-bg:var(--accent);--switch-knob:#ffffff}
+/* メインコンテナの設定
+   - 最大幅980pxで中央配置
+   - レスポンシブデザインの基準となる */
 .container{max-width:980px;margin:0 auto}
-/* make sizing predictable so padding doesn't cause overflow */
+/* パディングがオーバーフローを引き起こさないよう、サイズを予測可能にする */
+/* ボックスモデルの統一
+   - すべての要素でborder-boxを使用
+   - パディングとボーダーが幅に含まれる */
 *, *:before, *:after { box-sizing: border-box; }
 
-/* ensure content isn't hidden behind the fixed bar: reserve space equal to bar height */
+/* 固定バーの後ろにコンテンツが隠れないよう、バーの高さに等しいスペースを確保 */
+/* 固定バー（高さ約120px + パディング）の分だけ下部に余白を追加 */
 .container{padding-bottom:140px}
 
+/* 基本ボディスタイル
+   - システムフォントを優先（OSに応じた最適なフォント）
+   - 日本語フォント（ヒラギノ、メイリオ）も含む
+   - 背景色とテキスト色はCSS変数を使用 */
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","メイリオ",sans-serif;background:var(--bg);margin:0;padding:24px;color:var(--text)}
+/* 見出しスタイル */
 h1{font-size:20px;margin:0 0 8px}
+/* リードテキスト（説明文）のスタイル */
 .lead{color:var(--muted);margin-bottom:18px}
+/* グリッドレイアウト
+   - メインコンテンツ（1fr）とサイドバー（320px）の2列構成
+   - レスポンシブ対応でモバイルでは1列に変更 */
 .grid{display:grid;grid-template-columns:1fr 320px;gap:18px}
+/* カードコンポーネント
+   - 白背景、角丸、軽い影でモダンな見た目
+   - パディング16pxで適度な余白
+   - overflow:hiddenで角丸を完全に適用 */
 .card{background:var(--card);padding:16px;border-radius:8px;box-shadow:0 1px 2px rgba(0,0,0,.04);overflow:hidden}
-/* ensure card content defaults to left alignment */
+/* カードコンテンツをデフォルトで左揃えにする */
+/* グローバルな左揃え設定を強制適用 */
 .card { text-align: left !important; }
+/* フォーム行の基本レイアウト
+   - フレックスボックスで水平配置
+   - ラベルと入力フィールドを中央揃え */
 form .row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+/* ラベルスタイル
+   - 最小幅240pxで統一感を保持
+   - フォントサイズ16pxで読みやすく */
 label{min-width:240px;font-size:16px;color:var(--text);text-align:left !important}
+/* カード内ラベルの特別設定
+   - インラインブロックで適切な配置 */
 .card label { text-align: left !important; display: inline-block; }
-/* wrapper for input/control so we can constrain width without losing flex behavior */
+/* 入力/コントロールのラッパー。flex の動作を失わずに幅を制限できる */
+/* フィールドコントロールコンテナ
+   - フレックスボックスで内部要素を配置
+   - スライダーと出力表示を適切に配置 */
 .field-control{flex:1;display:flex;align-items:center;gap:8px}
-/* range slider styles inside field-control */
+/* field-control 内のレンジスライダーのスタイル */
+/* レンジスライダーのサイズ制御
+   - 最小80px、最大190pxで適切なサイズ
+   - 右マージンで出力表示との間隔を確保 */
 .field-control input[type="range"]{flex:1;margin-right:8px;min-width:80px;max-width:190px}
+/* スライダー出力表示のスタイル
+   - 最小幅56pxで数値表示に適したサイズ
+   - 右揃えで数値の桁揃えを実現
+   - タブラーナンバーで等幅フォント */
 .field-control output{min-width:56px;text-align:right;font-variant-numeric:tabular-nums;padding:6px 8px;border-radius:6px;background:transparent;border:1px solid transparent;color:var(--text)}
+/* 入力フィールドの共通スタイル
+   - 統一されたパディング、ボーダー、角丸
+   - 最大幅560pxで長すぎる入力を防止
+   - 透明背景でテーマ色に合わせる */
 input[type="text"], input[type="number"], select, textarea{flex:1;padding:8px;border:1px solid var(--input-border);border-radius:6px;font-size:14px;color:var(--text);background:transparent;max-width:560px}
 
-/* narrower variant for compact fields */
+/* コンパクトフィールド用の狭いバリアント */
+/* 限られたスペース用の入力フィールド
+   - 通常の560pxから240pxに縮小 */
 .field-control.compact input[type="text"], .field-control.compact input[type="number"]{max-width:240px}
-/* normalize checkbox size and alignment to avoid baseline/vertical-shift issues */
+/* ベースライン/垂直シフトの問題を避けるため、チェックボックスのサイズと配置を正規化 */
+/* チェックボックスの統一スタイル
+   - 18x18pxの固定サイズでブラウザ間の一貫性を確保
+   - 中央揃えでレイアウトの崩れを防止 */
 input[type="checkbox"]{
-	/* explicit size so different browsers render consistently */
+	/* 異なるブラウザで一貫してレンダリングされるよう、明示的なサイズ */
 	width:18px;height:18px;-webkit-appearance:checkbox;appearance:auto;
-	margin:0 8px; /* keep horizontal spacing */
-	vertical-align:middle;transform-origin:center center; /* avoid scale-based shifts */
+	margin:0 8px; /* 水平スペーシングを保持 */
+	vertical-align:middle;transform-origin:center center; /* スケールベースのシフトを回避 */
 }
+/* 説明テキストのスタイル
+   - 小さなフォントサイズで控えめに表示
+   - ミュート色で重要度を下げる */
 .desc{font-size:12px;color:var(--muted);margin-top:4px;text-align:left !important}
+/* アクションボタンエリア
+   - フレックスボックスでボタンを水平配置
+   - 8pxの間隔で適度な余白 */
 .actions{display:flex;gap:8px;align-items:center;margin-top:12px}
+/* ボタンの基本スタイル */
 button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
+/* プライマリボタン（メインアクション用） */
 .btn-primary{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
+/* ゴーストボタン（セカンダリアクション用）
+   - 透明背景で控えめな見た目 */
 .btn-ghost{background:var(--ghost-bg);color:var(--text);border:1px solid transparent;cursor:pointer}
-/* ghost button hover/focus for visibility and accessibility */
+/* 可視性とアクセシビリティのためのゴーストボタンのホバー/フォーカス */
+/* プライマリボタンのホバー効果
+   - 色を少し暗くして視覚的フィードバック
+   - 影を追加して立体感を演出 */
 .btn-primary:hover, .btn-primary:focus { background: color-mix(in srgb, var(--accent) 85%, black 15%); box-shadow: 0 4px 12px rgba(0,0,0,0.12); outline: none; }
+/* ゴーストボタンのホバー効果
+   - 境界線を表示してクリック可能であることを示す */
 .btn-ghost:hover, .btn-ghost:focus { border-color: rgba(0,0,0,0.12); outline: none; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+/* 固定バー内のゴーストボタンも同様の効果 */
 .fixed-bar .btn-ghost:hover, .fixed-bar .btn-ghost:focus { border-color: rgba(0,0,0,0.12); box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
 
-/* disabled appearance */
+/* 無効化された外観 */
+/* 無効化されたボタンのスタイル
+   - 透明度を下げて無効であることを示す
+   - グレースケールで色を抑える
+   - カーソルをnot-allowedに変更 */
 .btn-primary[disabled], .btn-ghost[disabled], button[disabled] { opacity: 0.55; cursor: not-allowed; filter: grayscale(8%); }
+/* ステータス表示のスタイル
+   - 小さなフォントで控えめに表示
+   - ミュート色で重要度を下げる */
 .status{margin-left:6px;font-size:13px;color:var(--muted)}
-/* improved pre/code styles for readability and accessibility */
+/* 可読性とアクセシビリティのための改善された pre/code スタイル */
+/* コードブロックのスタイル
+   - ダークテーマ対応の背景色とテキスト色
+   - 最大高さ40vhでスクロール可能
+   - 等幅フォントでコードの可読性を向上 */
 pre{
-	background: var(--pre-bg); /* use theme-aware pre background */
-	color: var(--pre-color); /* theme-aware pre text color */
+	background: var(--pre-bg); /* テーマ対応の pre 背景を使用 */
+	color: var(--pre-color); /* テーマ対応の pre テキスト色 */
 	padding: 14px;
 	border-radius: 8px;
 	overflow:auto;
@@ -59,131 +141,233 @@ pre{
 	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Segoe UI Mono', 'Noto Mono', monospace;
 	font-size:13px;
 	line-height:1.45;
-	white-space:pre-wrap; /* allow wrapping long lines */
+	white-space:pre-wrap; /* 長い行の折り返しを許可 */
 	word-break:break-word;
 }
+/* フォーカス時のアウトライン（アクセシビリティ対応） */
 pre:focus{ outline: 3px solid rgba(77,163,255,0.35); outline-offset:2px; }
+/* インラインコードのスタイル
+   - 軽い背景色でコードであることを示す
+   - パディングと角丸で視認性を向上 */
 code{ background: rgba(255,255,255,0.03); padding:2px 6px; border-radius:4px; font-family: inherit; }
+/* 警告メッセージのスタイル */
 .warning{color:var(--danger);font-size:13px}
+/* フィールドグループの区切り
+   - 点線ボーダーで視覚的にグループを分離 */
 .field-group{border-top:1px dashed #eee;padding-top:12px;margin-top:12px}
+/* 小さなテキストのスタイル
+   - 補足情報や注釈に使用 */
 .small{font-size:13px;color:var(--muted);text-align:left !important}
 
-/* ensure top-level containers are left-aligned */
+/* トップレベルのコンテナを左揃えにする */
+/* グローバルな左揃え設定
+   - すべてのコンテナとボディを左揃えに統一 */
 .container, body { text-align: left !important; }
 
-/* ensure lead/intro text and headings align left */
+/* lead/イントロテキストと見出しを左揃えにする */
+/* 重要なテキスト要素の左揃え設定 */
 .lead, .card h3 { text-align: left; }
+/* フル幅要素
+   - グリッドの全列にまたがる要素用 */
 .full-width{grid-column:1 / -1}
+/* タブレットサイズでのレスポンシブ対応
+   - グリッドを1列に変更
+   - ラベルの最小幅を140pxに縮小 */
 @media(max-width:880px){ .grid{grid-template-columns:1fr} label{min-width:140px} }
 
-/* Mobile-specific improvements */
+/* モバイル専用の改善 */
+/* スマートフォン向けの最適化
+   - パディングを縮小して画面を有効活用
+   - タッチ操作に適したサイズ調整 */
 @media (max-width:600px) {
 	body { padding: 12px; }
 	.container { padding: 0 6px; }
-	/* ensure there's ample bottom spacing on small screens where fixed bar may be taller */
+	/* 固定バーが高くなる可能性がある小さな画面で十分な下部スペーシングを確保 */
+	/* モバイルでの固定バー対応
+	   - デスクトップより少ないスペースで十分 */
 	.container { padding-bottom: 50px; }
-	/* stack label above input for easier reading (exclude checkbox rows so they remain horizontal) */
+	/* 読みやすくするため、ラベルを入力の上にスタック（チェックボックス行は除外して水平を維持） */
+	/* モバイルでのフォーム最適化
+	   - 縦積みレイアウトでタッチ操作を改善
+	   - チェックボックス行は水平レイアウトを維持 */
 	form .row:not(.checkbox-row) { flex-direction: column; align-items: stretch; gap: 6px; }
-	/* ensure non-checkbox rows stack and align to start */
+	/* 非チェックボックス行をスタックして開始位置に配置 */
+	/* フォーム行の縦積み設定
+	   - 左揃えで統一感を保持 */
 	form .row:not(.checkbox-row) { flex-direction: column; align-items: flex-start !important; gap: 6px; }
-	/* apply full-width labels only to non-checkbox rows */
+	/* フル幅ラベルを非チェックボックス行にのみ適用 */
+	/* モバイルでのラベル最適化
+	   - フル幅でタッチしやすく
+	   - フォントサイズを17pxに拡大（iOS推奨） */
 	form .row:not(.checkbox-row) label { min-width: 0; width: 100%; font-size: 17px; text-align: left !important; display: block !important; }
 
-	/* ensure checkbox-row labels match the global label size on mobile */
+	/* モバイルでチェックボックス行ラベルがグローバルラベルサイズと一致するよう確保 */
+	/* チェックボックス行ラベルの統一
+	   - 他のラベルと同じサイズで一貫性を保持 */
 	.row.checkbox-row label { font-size: 17px !important; font-weight: normal; line-height: 1.3 !important; }
 	.row:not(.checkbox-row) > label { align-self: flex-start !important; }
+	/* モバイルでの入力フィールド最適化
+	   - フル幅でタッチしやすく */
 	input[type="text"], input[type="number"], select, textarea { width: 100%; }
+	/* アクションボタンの縦積み
+	   - フル幅でタッチ操作を改善 */
 	.actions { flex-direction: column; align-items: stretch; }
 	.actions button, .actions .btn-ghost { width: 100%; padding: 12px; font-size: 15px; box-sizing: border-box; }
+	/* ヘッダーの縦積みレイアウト */
 	.header-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+	/* ヘッダーアクションの最適化
+	   - 右揃えでアクションボタンを配置 */
 	.header-actions { width: 100%; display:flex; justify-content: flex-end; flex-wrap:wrap; gap:8px }
+	/* カードとコードブロックのサイズ調整 */
 	.card { padding: 12px; }
 	pre { font-size: 12px; padding: 10px; }
 
-	/* keep checkboxes visually on the right on mobile */
+	/* モバイルでチェックボックスを視覚的に右側に配置 */
+	/* チェックボックス行の特別レイアウト
+	   - ラベルとチェックボックスを両端に配置 */
 	.row.checkbox-row { display:flex; align-items:center; justify-content:space-between; }
 	.row.checkbox-row label { width:auto; margin-right:8px; text-align:left !important; }
-	/* Place the checkbox control at the end (right side) of the row */
+	/* チェックボックスコントロールを行の終端（右側）に配置 */
+	/* チェックボックスの配置調整
+	   - order: 2で右端に配置
+	   - 中央揃えで視覚的バランスを保持 */
 	.row.checkbox-row input[type="checkbox"] { order: 2; margin-left:8px; margin-right:0; margin-top:0; align-self:center; vertical-align:middle; transform-origin:center center; }
-	/* helper class to nudge checkbox vertically when needed: add .checkbox-nudge to the row and adjust --chk-nudge */
+	/* 必要に応じてチェックボックスを垂直に微調整するヘルパークラス: 行に .checkbox-nudge を追加し、--chk-nudge を調整 */
+	/* チェックボックスの微調整システム
+	   - CSS変数で柔軟な位置調整が可能 */
 	.row.checkbox-row { --chk-nudge: 0px; }
 	.row.checkbox-row input[type="checkbox"].nudge { transform: translateY(var(--chk-nudge)); }
-	/* If you want the checkbox centered horizontally instead, add the helper class `.checkbox-center` to the row. */
+	/* チェックボックスを水平方向に中央揃えにしたい場合は、行にヘルパークラス `.checkbox-center` を追加 */
+	/* 中央揃えオプション
+	   - 特別なレイアウトが必要な場合のオプション */
 	.row.checkbox-row.checkbox-center { justify-content:center; }
 	.row.checkbox-row.checkbox-center label { margin-right:12px; }
 
-	/* make the compression slider longer on mobile: fill the available control column */
+	/* モバイルで圧縮スライダーを長くする: 利用可能なコントロール列を埋める */
+	/* スライダーのモバイル最適化
+	   - フル幅でタッチ操作を改善
+	   - 最小幅260pxで操作性を確保 */
 	.field-control input[type="range"]{ width:100%; max-width:100%; min-width:260px; }
 }
 
-/* Desktop: ensure checkbox rows align their control column with other inputs
-   so the left edge of checkboxes lines up with text/number/select inputs. */
+/* デスクトップ: チェックボックス行のコントロール列を他の入力と揃える
+   チェックボックスの左端がテキスト/数値/選択入力と揃うように */
+/* デスクトップ向けのレイアウト最適化
+   - 大きな画面での視覚的統一感を重視
+   - グリッドレイアウトで精密な配置制御 */
 @media (min-width:601px) {
 	.row.checkbox-row { justify-content:flex-start; }
-	/* ensure checkbox row labels reserve the same min width as other labels */
+	/* チェックボックス行ラベルが他のラベルと同じ最小幅を確保 */
+	/* ラベル幅の統一
+	   - すべてのラベルで240pxの最小幅を保持 */
 	.row.checkbox-row > label { min-width:240px; }
-	/* place checkbox right after label, same alignment as other controls */
+	/* ラベルの直後にチェックボックスを配置、他のコントロールと同じ配置 */
+	/* チェックボックスの配置統一
+	   - order: 0でラベルの直後に配置
+	   - 他のコントロールと同じ位置に揃える */
 	.row.checkbox-row input[type="checkbox"] { order: 0; margin-left:8px; margin-right:0; }
 
-	/* switch desktop rows to a grid so control columns align exactly */
+	/* デスクトップ行をグリッドに切り替えてコントロール列を正確に揃える */
+	/* グリッドレイアウトの適用
+	   - ラベル列（240px）とコントロール列（1fr）の2列構成
+	   - すべての行で統一された配置を実現 */
 	form .row { display: grid; grid-template-columns: 240px 1fr; align-items: center; gap: 8px; }
-	/* ensure checkbox sits at the start of the control column (no extra offset) */
-	/* make the control wrapper stretch to fill the control column so range slider can be long */
+	/* チェックボックスがコントロール列の開始位置に配置されるよう確保（余分なオフセットなし） */
+	/* コントロールラッパーを伸ばしてコントロール列を埋め、レンジスライダーを長くできるようにする */
+	/* グリッド内要素の配置制御
+	   - field-control: コントロール列全体に伸ばす
+	   - 入力要素: 左端に配置
+	   - チェックボックス: 左端に配置（マージンなし） */
 	form .row .field-control { justify-self: stretch; }
 	form .row input, form .row select, form .row textarea { justify-self: start; }
 	.row.checkbox-row input[type="checkbox"] { margin-left:0; justify-self:start; }
 }
 
-/* moved from inline attributes in settings.html */
+/* settings.html のインライン属性から移動 */
+/* 区切り線のスタイル */
 hr { margin: 12px 0; }
+/* 生データ表示の非表示設定 */
 #raw { display: none; }
 
-/* Dark theme variables (applied when root has data-theme="dark") */
+/* ダークテーマ変数（ルートに data-theme="dark" がある場合に適用） */
+/* ダークテーマの色設定
+   - 暗い背景色で目に優しい表示
+   - 明るいテキスト色でコントラストを確保
+   - アクセント色は青系で統一感を保持 */
 :root[data-theme="dark"]{
 	--bg:#0b0d0f;
 	--card:#121416;
 	--accent:#4da3ff;
-	--muted:#9fb3bf; /* slightly lighter muted color for readability */
+	--muted:#9fb3bf; /* 可読性のため、少し明るいミュート色 */
 	--danger:#ff6b6b;
-	/* theme text color: brighter on dark background */
+	/* テーマテキスト色: ダーク背景で明るく */
 	--text:#e6eef6;
-	/* adjust pre background and text for dark theme to keep good contrast */
+	/* ダークテーマで良いコントラストを保つため、pre の背景とテキストを調整 */
 	--pre-bg: #0b0f14;
 	--pre-color: #e6eef6;
-	/* input and ghost button adjustments for dark */
-	--input-border: rgba(255,255,255,0.12); /* stronger border for visibility */
-	--ghost-bg: rgba(255,255,255,0.06); /* slightly brighter ghost background */
+	/* ダーク用の入力とゴーストボタンの調整 */
+	--input-border: rgba(255,255,255,0.12); /* 可視性のため、より強い境界線 */
+	--ghost-bg: rgba(255,255,255,0.06); /* 少し明るいゴースト背景 */
 }
 
-/* override switch vars for dark theme if necessary (keep knob light for contrast) */
+/* 必要に応じてダークテーマ用のスイッチ変数をオーバーライド（コントラストのためノブを明るく保つ） */
+/* ダークテーマでのスイッチ色調整
+   - ノブは常に白色でコントラストを確保
+   - オフ/オン状態はテーマ色に合わせる */
 :root[data-theme="dark"]{ --switch-off-bg: var(--ghost-bg); --switch-on-bg: var(--accent); --switch-knob: #ffffff }
 
-/* simple transition for theme change */
+/* テーマ変更のためのシンプルなトランジション */
+/* スムーズなテーマ切り替え
+   - 220msのイージングで自然な変化
+   - 背景色、テキスト色、影の変化をアニメーション */
 body, .card, pre { transition: background-color 220ms ease, color 220ms ease, box-shadow 220ms ease; }
 
-/* layout helpers used in settings.html header */
+/* settings.html ヘッダーで使用されるレイアウトヘルパー */
+/* ヘッダー行のレイアウト
+   - フレックスボックスで左右に要素を配置
+   - レスポンシブ対応で折り返し可能 */
 .header-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+/* ヘッダーアクションの配置
+   - 右端にアクションボタンを配置 */
 .header-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
-/* tighten theme control spacing */
+/* テーマコントロールのスペーシングを詰める */
+/* ヘッダーボタンのマージン調整 */
 .header-actions button{margin-left:0}
-/* ensure header buttons don't touch the card below */
+/* ヘッダーボタンが下のカードに触れないよう確保 */
+/* リードテキストの下部マージン */
 .lead{margin-bottom:12px}
+/* マージンなしのユーティリティクラス */
 .no-margin{margin:0}
 
-/* fixed save bar */
+/* 固定保存バー */
+/* 画面下部に固定される保存バー
+   - 常に表示されてアクセシビリティを向上
+   - 影で浮いているような視覚効果 */
 .fixed-bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);box-shadow:0 -6px 18px rgba(0,0,0,0.08);padding:10px 12px;z-index:70}
+/* 固定バー内部のレイアウト
+   - 最大幅980pxで中央配置
+   - 右端にボタンを配置 */
 .fixed-bar-inner{max-width:980px;margin:0 auto;display:flex;gap:8px;align-items:center;justify-content:flex-end}
+/* 固定バー内のボタンスタイル */
 .fixed-bar .btn-primary{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:6px}
 .fixed-bar .btn-ghost{background:var(--ghost-bg);color:var(--text);border:1px solid transparent}
+/* 固定バー内のステータス表示 */
 .fixed-bar .status{margin-left:10px;color:var(--muted)}
 
-/* pin the theme toggle to the right edge of the fixed bar */
+/* テーマトグルを固定バーの右端にピン留め */
+/* テーマ切り替えボタンの配置
+   - 右端に固定してアクセスしやすく */
 .fixed-bar #themeToggle { margin-left: auto; }
 
+/* モバイル向け固定バーの最適化 */
 @media (max-width:600px){
+	/* 固定バー内部のスペーシング調整 */
 	.fixed-bar-inner{padding:0 6px;gap:6px}
+	/* ボタンをフル幅に拡張してタッチしやすく */
 	.fixed-bar .btn-primary{flex:1}
 	.fixed-bar .btn-ghost{flex:1}
-	/* Narrow the theme toggle button slightly on small screens so it doesn't span full width */
+	/* 小さな画面でテーマトグルボタンを少し狭めて、全幅にまたがらないようにする */
+	/* テーマトグルのサイズ制限
+	   - 最小60px、最大100pxで適切なサイズを保持 */
 	.fixed-bar #themeToggle{ flex: 0 0 auto; min-width: 60px; max-width: 100px; padding: 10px 12px; }
 }

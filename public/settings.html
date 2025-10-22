@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>⚙ WebDAV Server - Settings</title>
+  <title>⚙ WebDAV Pic Server - Settings</title>
   <link rel="stylesheet" href="/setting/css/settings.css">
   <!-- favicons: add both /icons and /setting/icons paths to match server static routing -->
   <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg">
@@ -28,7 +28,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>WebDAV Server — 設定画面</h1>
+    <h1>WebDAV Pic Server — 設定画面</h1>
   <!-- <div class="header-row">
       <div class="lead">フォームで設定を編集できます。各項目の説明を参照の上、編集してください。編集後は <strong>保存</strong> を押して反映します。</div>
       <div class="header-actions">
@@ -39,13 +39,13 @@
       <div class="card">
         <form id="settingsForm" autocomplete="off">
           <div class="field-group">
-            <h3>圧縮設定</h3>
+            <h3>レスポンス圧縮設定</h3>
             <div class="row checkbox-row">
-              <label for="COMPRESSION_ENABLED">レスポンス圧縮を有効にする</label>
+              <label for="COMPRESSION_ENABLED">gzip 圧縮を有効にする</label>
               <input id="COMPRESSION_ENABLED" name="COMPRESSION_ENABLED" type="checkbox" />
             </div>
             <div class="row">
-              <label for="COMPRESSION_THRESHOLD">圧縮閾値 (0.0〜1.0)</label>
+              <label for="COMPRESSION_THRESHOLD">圧縮閾値 (0.00 〜 1.00)</label>
               <div class="field-control">
                 <input id="COMPRESSION_THRESHOLD" name="COMPRESSION_THRESHOLD" type="range" step="0.01" min="0" max="1" />
                 <output id="COMPRESSION_THRESHOLD_VAL" for="COMPRESSION_THRESHOLD">0.00</output>
@@ -60,15 +60,19 @@
               <label for="IMAGE_TEMPLATE">テンプレート</label>
               <select id="IMAGE_TEMPLATE" name="IMAGE_TEMPLATE">
                 <option value="">未選択</option>
-                <option value="small">最低画質</option>
-                <option value="medium">中画質</option>
-                <option value="large">高画質</option>
-                <option value="hq">オリジナル画質</option>
+                <option value="smallest">1 - 最低画質</option>
+                <option value="small">2 - 低画質</option>
+                <option value="medium">3 - 中画質</option>
+                <option value="large">4 - 高画質</option>
+                <option value="hq">5 - 元画質</option>
               </select>
             </div>
             <div class="row">
               <label for="PHOTO_SIZE">最大画像サイズ (px)</label>
-              <input id="PHOTO_SIZE" name="PHOTO_SIZE" type="number" min="16" inputmode="numeric" pattern="[0-9]*" />
+              <div class="field-control">
+                <input id="PHOTO_SIZE" name="PHOTO_SIZE" type="range" step="16" min="320" max="2400" />
+                <output id="PHOTO_SIZE_VAL" for="PHOTO_SIZE">1080</output>
+              </div>
             </div>
             <div class="row">
               <label for="DEFAULT_QUALITY">品質（1〜100）</label>
@@ -80,9 +84,9 @@
             <div class="row">
               <label for="IMAGE_MODE">画像処理モード</label>
               <select id="IMAGE_MODE" name="IMAGE_MODE">
-                <option value="1">1 — 高速（低負荷）</option>
-                <option value="2">2 — バランス（推奨）</option>
-                <option value="3">3 — 高品質（高負荷）</option>
+                <option value="1">1 - 高速（低負荷）</option>
+                <option value="2">2 - バランス</option>
+                <option value="3">3 - 高品質（高負荷）</option>
               </select>
             </div>
             <!-- <div class="desc">画像のリサイズ上限(px)、デフォルトの出力品質、処理モードを設定</div> -->
@@ -235,7 +239,14 @@
     </div>
   </div>
 
-  <!-- fixed save bar -->
+  <!-- 固定表示される保存バー -->
+  <!--
+    画面下部にある固定バーには主に以下の操作が含まれます:
+      - 再読み込み (btnLoadFixed)
+      - 設定の保存 (btnSaveFixed)
+      - テーマ切替 (themeToggle)
+    ステータス表示は statusFixed に表示されます。
+  -->
   <div id="fixedBar" class="fixed-bar" aria-hidden="false">
     <div class="fixed-bar-inner">
       <button id="btnLoadFixed" class="btn-ghost" type="button">再読み込み</button>
@@ -246,7 +257,18 @@
   </div>
 
   <script>
-    // mapping between form fields and config keys
+  // ==========================================
+  // スクリプト概要（日本語）
+    // このスクリプトはフォームとサーバ上の設定ファイルを同期します。
+    // 主な機能:
+    //  - /setting/data から設定ファイルを取得してフォームに反映する (loadConfig)
+    //  - フォームの値から設定ファイル形式のテキストを生成する (buildConfigText)
+    //  - /setting/save に POST して保存する (saveConfig)
+    //  - UI 表示の補助（スライダーの出力表示、トグルスイッチのビジュアル化）
+    //  - 入力検証と未保存判定（dirty チェック）
+    // 実行ロジックは元のままにし、可読性向上のためのコメントのみ追加しています。
+  // ==========================================
+  // フォーム要素と設定キーのマッピング
     const keys = [
       'COMPRESSION_ENABLED','COMPRESSION_THRESHOLD',
       'PORT','ROOT_PATH','MAX_LIST',
@@ -257,15 +279,15 @@
       'RESTART_ENABLED','RESTART_TIME','MAGICK_PATH'
     ];
 
-    // convenience helpers
+  // ヘルパー関数
     const byId = id => document.getElementById(id);
     const statusEl = byId('status');
     const rawEl = byId('raw');
     const themeBtn = byId('themeToggle');
-  // initial snapshot used for dirty checking
+  // 未保存検出のための初期スナップショット
   let initialConfigText = null;
 
-    // Theme helpers: apply and persist theme (light/dark)
+  // テーマ切替ヘルパー（ライト/ダーク）
     function applyTheme(theme){
       if (theme === 'dark') document.documentElement.setAttribute('data-theme','dark');
       else document.documentElement.removeAttribute('data-theme');
@@ -296,12 +318,14 @@
         statusEl.textContent = msg || '';
         statusEl.style.color = err ? 'var(--danger)' : '';
       } catch(e) {
-        // ignore DOM write errors when status element is absent
+        // ステータス要素が存在しない場合の DOM 書き込みエラーを無視
       }
     }
 
-    // parse config.txt into object {KEY: value}
-    function parseConfig(text) {
+  // config.txt の内容を解析して { KEY: value } 形式のオブジェクトを返す
+  // - コメント行(#)および空行は無視
+  // - 値は文字列として保持し、UI 側で必要に応じて型変換する
+  function parseConfig(text) {
       const out = {};
       const lines = text.split(/\r?\n/);
       for (const line of lines) {
@@ -311,14 +335,16 @@
         if (idx === -1) continue;
         const k = t.slice(0, idx).trim();
         let v = t.slice(idx+1).trim();
-        // keep as string; we'll interpret booleans/numbers in UI logic
+  // 値は文字列のまま保持し、UI 側で真偽値や数値として解釈します
         out[k] = v;
       }
       return out;
     }
 
-    // populate form from config object
-    function populateForm(cfg) {
+  // 設定オブジェクトからフォーム要素に値を反映する
+  // - チェックボックスは 'true'/'false' 文字列を真偽に変換
+  // - 一部の項目は表示単位（秒/KB）に変換して表示する
+  function populateForm(cfg) {
       for (const k of keys) {
         const el = byId(k);
         if (!el) continue;
@@ -329,9 +355,9 @@
           el.value = (typeof v !== 'undefined') ? v : '';
         }
       }
-      // show raw
+  // 生データプレビューを表示/更新
       buildRaw();
-      // Update compression slider display if present (ensure value reflects loaded config)
+  // 圧縮閾値スライダーの表示を更新（読み込んだ設定を反映）
       try {
         const compSlider = byId('COMPRESSION_THRESHOLD');
         const compOut = byId('COMPRESSION_THRESHOLD_VAL');
@@ -340,7 +366,7 @@
           compOut.textContent = isNaN(n) ? '0.00' : n.toFixed(2);
         }
       } catch(e) {}
-      // Convert CACHE_TTL_MS (stored in ms) to seconds for UI
+  // CACHE_TTL_MS（設定ファイルは ms）を UI 用に秒に変換
       try {
         const el = byId('CACHE_TTL_MS');
         if (el) {
@@ -351,7 +377,7 @@
           }
         }
       } catch(e) {}
-      // Convert CACHE_MIN_SIZE (stored in bytes) to KB for UI
+  // CACHE_MIN_SIZE（設定ファイルは bytes）を UI 用に KB に変換
       try {
         const el = byId('CACHE_MIN_SIZE');
         if (el) {
@@ -362,7 +388,7 @@
           }
         }
       } catch(e) {}
-      // Convert RATE_LIMIT_WINDOW_MS (stored in ms) to seconds for UI
+  // RATE_LIMIT_WINDOW_MS（設定ファイルは ms）を UI 用に秒に変換
       try {
         const el = byId('RATE_LIMIT_WINDOW_MS');
         if (el) {
@@ -373,7 +399,7 @@
           }
         }
       } catch(e) {}
-      // Update default quality display if present
+  // DEFAULT_QUALITY の表示を更新
       try {
         const qSlider = byId('DEFAULT_QUALITY');
         const qOut = byId('DEFAULT_QUALITY_VAL');
@@ -382,7 +408,16 @@
           qOut.textContent = isNaN(n) ? '50' : String(n);
         }
       } catch(e) {}
-      // Update max concurrency display if present
+  // PHOTO_SIZE スライダー表示を更新 (px 表示)
+      try {
+        const pSlider = byId('PHOTO_SIZE');
+        const pOut = byId('PHOTO_SIZE_VAL');
+        if (pSlider && pOut) {
+          const n = Number(pSlider.value || 1080);
+          pOut.textContent = isNaN(n) ? '1080' : String(Math.round(n));
+        }
+      } catch(e) {}
+  // MAX_CONCURRENCY の表示を更新
       try {
         const mSlider = byId('MAX_CONCURRENCY');
         const mOut = byId('MAX_CONCURRENCY_VAL');
@@ -391,7 +426,7 @@
           mOut.textContent = isNaN(n) ? '4' : String(Math.round(n));
         }
       } catch(e) {}
-      // Update Sharp memory limit display if present
+  // SHARP_MEMORY_LIMIT の表示を更新
       try {
         const sSlider = byId('SHARP_MEMORY_LIMIT');
         const sOut = byId('SHARP_MEMORY_LIMIT_VAL');
@@ -400,7 +435,7 @@
           sOut.textContent = isNaN(n) ? '512' : String(Math.round(n));
         }
       } catch(e) {}
-      // sync checkbox-based toggle switches (if present) to the checkbox state
+  // チェックボックス行のトグル表示をチェック状態に同期
       try {
         document.querySelectorAll('input[type="checkbox"]').forEach(cb => {
           try {
@@ -415,29 +450,30 @@
       } catch(e) {}
     }
 
-    // build raw config text from form values (with comments/header)
-    function buildConfigText() {
+  // フォームの現在値を設定ファイル形式のテキストに組み立てる
+  // - UI 表示の単位変換（秒→ms、KB→bytes）を逆変換してファイル用の値に整形する
+  function buildConfigText() {
       const header = [
         '# WebDAV画像変換サーバー設定ファイル (自動生成)',
         '# 編集はフォームで行ってください。'
       ];
       const lines = [...header];
-      // group order similar to original file
+  // 出力順（元ファイルに近い順序）
       const add = (k) => {
         const el = byId(k);
         if (!el) return;
         let v;
         if (el.type === 'checkbox') v = el.checked ? 'true' : 'false';
         else if (k === 'CACHE_TTL_MS') {
-          // UI shows seconds; convert back to milliseconds for config file
+          // UI は秒表示。設定ファイル用にミリ秒に戻す
           const secs = Number(el.value || 0);
           v = String(Math.round((isNaN(secs) ? 0 : secs) * 1000));
         } else if (k === 'CACHE_MIN_SIZE') {
-          // UI shows KB; convert back to bytes for config file
+          // UI は KB 表示。設定ファイル用にバイトに戻す
           const kb = Number(el.value || 0);
           v = String(Math.round((isNaN(kb) ? 0 : kb) * 1024));
         } else if (k === 'RATE_LIMIT_WINDOW_MS') {
-          // UI shows seconds; convert back to milliseconds for config file
+          // UI は秒表示。設定ファイル用にミリ秒に戻す
           const secs = Number(el.value || 0);
           v = String(Math.round((isNaN(secs) ? 0 : secs) * 1000));
         } else v = el.value ?? '';
@@ -455,20 +491,20 @@
         ['MAGICK_PATH']
       ];
       for (const g of groups) {
-        lines.push(''); // blank line between groups
+  lines.push(''); // グループ間に空行を挿入
         for (const k of g) add(k);
       }
       return lines.join('\n') + '\n';
     }
 
-    // build raw preview
-    function buildRaw() {
+  // テキストプレビュー（raw）を更新する
+  function buildRaw() {
       if (!rawEl) return;
       rawEl.textContent = buildConfigText();
     }
 
-    // save-button enable/disable helpers
-    function setSaveEnabled(enabled) {
+  // 保存ボタンの有効/無効を切り替える
+  function setSaveEnabled(enabled) {
       try {
         const btns = [];
         const a = byId('btnSave'); if (a) btns.push(a);
@@ -481,7 +517,8 @@
       } catch(e){}
     }
 
-    function checkDirty() {
+  // 初期スナップショットと比較して変更があれば true を返す（未保存判定）
+  function checkDirty() {
       try {
         const cur = buildConfigText();
         const dirty = initialConfigText === null ? false : (cur !== initialConfigText);
@@ -490,29 +527,32 @@
       } catch(e){ return false; }
     }
 
-    // validate simple constraints, returns {ok:bool, msg:...}
-    function validate() {
-      // example: port range
+  // 入力の簡易バリデーションを行う
+  // 成功: {ok:true}
+  // 失敗: {ok:false, msg: 'エラーメッセージ'}
+  function validate() {
+      // 例: ポート範囲
       const port = Number(byId('PORT').value || 0);
       if (!Number.isInteger(port) || port < 1 || port > 65535) return {ok:false,msg:'PORT は 1..65535 の整数で指定してください'};
       const q = Number(byId('DEFAULT_QUALITY').value || 0);
       if (!Number.isFinite(q) || q < 1 || q > 100) return {ok:false,msg:'DEFAULT_QUALITY は 1..100 で指定してください'};
       const pct = Number(byId('COMPRESSION_THRESHOLD').value || -1);
       if (!Number.isFinite(pct) || pct < 0 || pct > 1) return {ok:false,msg:'COMPRESSION_THRESHOLD は 0.0 〜 1.0 の値で指定してください'};
-      // CACHE_TTL_MS is shown in seconds in the UI
+      // CACHE_TTL_MS は UI で秒表示
       const cacheSecs = Number(byId('CACHE_TTL_MS').value || 0);
       if (!Number.isFinite(cacheSecs) || cacheSecs < 0) return {ok:false, msg:'CACHE_TTL_MS は 0 以上の秒数で指定してください'};
-  // RATE_LIMIT_WINDOW_MS is shown in seconds in the UI
+  // RATE_LIMIT_WINDOW_MS は UI で秒表示
   const rateWindowSecs = Number(byId('RATE_LIMIT_WINDOW_MS').value || 0);
   if (!Number.isFinite(rateWindowSecs) || rateWindowSecs < 0) return {ok:false, msg:'RATE_LIMIT_WINDOW_MS は 0 以上の秒数で指定してください'};
-      // CACHE_MIN_SIZE is shown in KB in the UI
+      // CACHE_MIN_SIZE は UI で KB 表示
       const cacheMinKb = Number(byId('CACHE_MIN_SIZE').value || 0);
       if (!Number.isFinite(cacheMinKb) || cacheMinKb < 0) return {ok:false, msg:'CACHE_MIN_SIZE は 0 以上の KB で指定してください'};
       return {ok:true};
     }
 
-    // fetch config.txt content
-    async function loadConfig() {
+  // サーバーから設定データを取得してフォームに反映する非同期関数
+  // エンドポイント: GET /setting/data
+  async function loadConfig() {
       setStatus('Loading...');
       try {
         const r = await fetch('/setting/data');
@@ -523,7 +563,7 @@
         if (statusLocal) statusLocal.textContent = '';
         const cfg = parseConfig(txt);
         populateForm(cfg);
-        // store snapshot for dirty checking
+        // 未保存チェック用のスナップショットを保存
         initialConfigText = buildConfigText();
         checkDirty();
         setStatus('Loaded');
@@ -532,13 +572,14 @@
       }
     }
 
-    // save config: build text and POST
-    async function saveConfig() {
+  // フォームの値を組み立ててサーバに保存する非同期関数
+  // エンドポイント: POST /setting/save
+  async function saveConfig() {
       setStatus('Validating...');
       const v = validate();
       if (!v.ok) { setStatus(v.msg, true); return; }
       const text = buildConfigText();
-      // show raw preview before saving (only if raw preview exists)
+  // 保存前に生データ（raw）プレビューを表示（プレビュー要素が存在する場合のみ）
       if (rawEl) rawEl.textContent = text;
       setStatus('Saving...');
       try {
@@ -548,7 +589,7 @@
           body: JSON.stringify({ content: text })
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        // update snapshot and disable save until next change
+        // スナップショットを更新し、次の変更まで保存を無効化
         initialConfigText = buildConfigText();
         setSaveEnabled(false);
         setStatus('Saved');
@@ -557,21 +598,21 @@
       }
     }
 
-    // event wiring (guarded in case buttons are commented out)
+    // イベント配線（ボタンがコメントアウトされている場合のガード付き）
     const btnLoadEl = document.getElementById('btnLoad');
     const btnSaveEl = document.getElementById('btnSave');
     const btnRawEl = document.getElementById('btnRaw');
     if (btnLoadEl) btnLoadEl.addEventListener('click', loadConfig);
     if (btnSaveEl) btnSaveEl.addEventListener('click', () => { saveConfig(); });
     if (btnRawEl) btnRawEl.addEventListener('click', () => {
-      if (!rawEl) return; // raw preview intentionally removed/commented out
+      if (!rawEl) return; // raw プレビューは意図的に削除/コメントアウト済み
       rawEl.style.display = rawEl.style.display === 'none' ? 'block' : 'none';
     });
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
 
-    // initialize
+    // 初期化
     (function init(){
-      // set some defaults
+      // デフォルト値を設定
       for (const k of keys) {
         const el = byId(k);
         if (!el) continue;
@@ -580,16 +621,16 @@
       }
       loadConfig();
       loadTheme();
-      // initially disable save buttons until we have a snapshot
+      // スナップショットが取得されるまで保存ボタンを無効化
       setSaveEnabled(false);
-      // wire change listeners to detect dirty state
+      // 未保存状態を検出するための変更リスナーを配線
       for (const k of keys) {
         const el = byId(k);
         if (!el) continue;
         const ev = (el.type === 'checkbox' || el.tagName.toLowerCase() === 'select') ? 'change' : 'input';
         el.addEventListener(ev, () => checkDirty());
       }
-      // compression threshold slider wiring: update output and dirty state
+      // 圧縮閾値スライダーの配線: 出力と未保存状態を更新
       const compSlider = byId('COMPRESSION_THRESHOLD');
       const compOut = byId('COMPRESSION_THRESHOLD_VAL');
       function updateCompressionDisplay(v){
@@ -598,12 +639,12 @@
         if (compOut) compOut.textContent = n.toFixed(2);
       }
       if (compSlider) {
-        // when populateForm sets the value, ensure display is updated
+        // populateForm が値を設定する際、表示が更新されることを確認
         compSlider.addEventListener('input', (e) => { updateCompressionDisplay(e.target.value); checkDirty(); });
-        // initialize display from current value
+        // 現在の値から表示を初期化
         updateCompressionDisplay(compSlider.value || 0);
       }
-      // DEFAULT_QUALITY slider wiring
+      // DEFAULT_QUALITY スライダーの配線
       const qSlider = byId('DEFAULT_QUALITY');
       const qOut = byId('DEFAULT_QUALITY_VAL');
       function updateQualityDisplay(v){
@@ -615,7 +656,20 @@
         qSlider.addEventListener('input', (e) => { updateQualityDisplay(e.target.value); checkDirty(); });
         updateQualityDisplay(qSlider.value || 50);
       }
-      // MAX_CONCURRENCY slider wiring
+      // PHOTO_SIZE スライダーの配線
+      const pSlider = byId('PHOTO_SIZE');
+      const pOut = byId('PHOTO_SIZE_VAL');
+      function updatePhotoSizeDisplay(v){
+        const n = Number(v);
+        if (isNaN(n)) { if (pOut) pOut.textContent = '1080'; return; }
+        if (pOut) pOut.textContent = String(Math.round(n));
+      }
+      if (pSlider) {
+        pSlider.addEventListener('input', (e) => { updatePhotoSizeDisplay(e.target.value); checkDirty(); });
+        // 初期表示
+        updatePhotoSizeDisplay(pSlider.value || 1080);
+      }
+      // MAX_CONCURRENCY スライダーの配線
       const mSlider = byId('MAX_CONCURRENCY');
       const mOut = byId('MAX_CONCURRENCY_VAL');
       function updateMaxConcurrencyDisplay(v){
@@ -627,7 +681,7 @@
         mSlider.addEventListener('input', (e) => { updateMaxConcurrencyDisplay(e.target.value); checkDirty(); });
         updateMaxConcurrencyDisplay(mSlider.value || 4);
       }
-      // SHARP_MEMORY_LIMIT slider wiring
+      // SHARP_MEMORY_LIMIT スライダーの配線
       const sSlider = byId('SHARP_MEMORY_LIMIT');
       const sOut = byId('SHARP_MEMORY_LIMIT_VAL');
       function updateSharpMemoryDisplay(v){
@@ -639,46 +693,50 @@
         sSlider.addEventListener('input', (e) => { updateSharpMemoryDisplay(e.target.value); checkDirty(); });
         updateSharpMemoryDisplay(sSlider.value || 512);
       }
-      // wire template selector
+      // テンプレートセレクターの配線
       const templateSelect = byId('IMAGE_TEMPLATE');
       const templates = {
+        smallest: { PHOTO_SIZE: '640', DEFAULT_QUALITY: '10', IMAGE_MODE: '1' },
         small: { PHOTO_SIZE: '640', DEFAULT_QUALITY: '30', IMAGE_MODE: '1' },
-        medium: { PHOTO_SIZE: '1080', DEFAULT_QUALITY: '50', IMAGE_MODE: '2' },
+        medium: { PHOTO_SIZE: '1040', DEFAULT_QUALITY: '50', IMAGE_MODE: '2' },
         large: { PHOTO_SIZE: '1440', DEFAULT_QUALITY: '70', IMAGE_MODE: '2' },
         hq: { PHOTO_SIZE: '2400', DEFAULT_QUALITY: '85', IMAGE_MODE: '3' }
       };
       if (templateSelect) {
         templateSelect.addEventListener('change', (ev) => {
           const v = ev.target.value;
-          if (!v) return; // no-op when clearing
+          if (!v) return; // 選択をクリアした場合は何もしない
           const t = templates[v];
           if (!t) return;
-          // apply template values to form fields
+          // テンプレート値をフォームフィールドに適用
           for (const k of Object.keys(t)) {
             const el = byId(k);
             if (!el) continue;
             el.value = t[k];
           }
-          // programmatic changes don't fire input/change events in all browsers,
-          // so update any UI-only displays (slider outputs) manually.
+          // プログラム的な変更はすべてのブラウザで input/change イベントを発火しないため、
+          // UI 専用の表示（スライダー出力）を手動で更新
           try {
             if (typeof updateQualityDisplay === 'function' && qSlider) updateQualityDisplay(qSlider.value);
           } catch(e) {}
+              try {
+                if (typeof updatePhotoSizeDisplay === 'function' && pSlider) updatePhotoSizeDisplay(pSlider.value);
+              } catch(e) {}
           try {
             if (typeof updateCompressionDisplay === 'function' && compSlider) updateCompressionDisplay(compSlider.value);
           } catch(e) {}
-          // values changed programmatically — re-check dirty state
+          // プログラム的に値が変更されたため、未保存状態を再チェック
           try { checkDirty(); } catch(e) {}
         });
       }
 
-      // wire fixed bar buttons (if present)
+      // 固定バーボタンの配線（存在する場合）
       const btnSaveFixed = byId('btnSaveFixed');
       const btnLoadFixed = byId('btnLoadFixed');
       const statusFixed = byId('statusFixed');
       if (btnSaveFixed) btnSaveFixed.addEventListener('click', () => saveConfig());
       if (btnLoadFixed) btnLoadFixed.addEventListener('click', () => loadConfig());
-      // keep status in sync
+      // ステータスを同期
       const origSetStatus = setStatus;
       setStatus = (msg, err) => {
         try {
@@ -689,26 +747,26 @@
         } catch(e) {}
       };
 
-      // convert checkbox rows into accessible visual toggle switches
+      // チェックボックス行をアクセシブルな視覚的トグルスイッチに変換
       try {
         const checkboxRows = document.querySelectorAll('.checkbox-row');
         checkboxRows.forEach(row => {
           const cb = row.querySelector('input[type="checkbox"]');
           if (!cb) return;
-          // avoid double-inserting
+          // 二重挿入を回避
           if (row.querySelector('.switch')) return;
           const sw = document.createElement('span');
           sw.className = 'switch' + (cb.checked ? ' on' : '');
           sw.setAttribute('tabindex', '0');
           sw.setAttribute('role', 'switch');
           sw.setAttribute('aria-checked', cb.checked ? 'true' : 'false');
-          // when switch clicked, toggle checkbox and fire events
+          // スイッチがクリックされたとき、チェックボックスをトグルしてイベントを発火
           const toggle = () => {
             cb.checked = !cb.checked;
-            // update visual
+            // 視覚的表示を更新
             if (cb.checked) sw.classList.add('on'); else sw.classList.remove('on');
             sw.setAttribute('aria-checked', cb.checked ? 'true' : 'false');
-            // emit change event for existing listeners
+            // 既存のリスナーに change イベントを発火
             try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
             try { checkDirty(); } catch(e) {}
           };
@@ -716,12 +774,12 @@
           sw.addEventListener('keydown', (e) => {
             if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); }
           });
-          // keep switch in sync if checkbox changed externally
+          // チェックボックスが外部で変更された場合、スイッチを同期
           cb.addEventListener('change', () => {
             if (cb.checked) sw.classList.add('on'); else sw.classList.remove('on');
             sw.setAttribute('aria-checked', cb.checked ? 'true' : 'false');
           });
-          // append switch after the label or at end of row
+          // ラベルの後または行の最後にスイッチを追加
           row.appendChild(sw);
         });
       } catch(e) {}

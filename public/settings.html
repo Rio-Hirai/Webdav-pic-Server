@@ -19,6 +19,8 @@
   .checkbox-row { display:flex; align-items:center; gap:8px; }
   /* 視覚的な無効（ディアクティブ）状態のスタイル */
   .row.disabled { opacity: 0.5; }
+  /* 非表示クラス: 要素を DOM 上で隠す（出現/消滅） */
+  .row.hidden { display: none; }
   .row.disabled .field-control { pointer-events: none; }
   .checkbox-row label { margin:0; }
   .checkbox-row input[type="checkbox"] { display:none; }
@@ -41,21 +43,6 @@
     <div class="grid">
       <div class="card">
         <form id="settingsForm" autocomplete="off">
-          <div class="field-group">
-            <h3>レスポンス圧縮設定</h3>
-            <div class="row checkbox-row">
-              <label for="COMPRESSION_ENABLED">gzip 圧縮を有効にする</label>
-              <input id="COMPRESSION_ENABLED" name="COMPRESSION_ENABLED" type="checkbox" />
-            </div>
-            <div class="row">
-              <label for="COMPRESSION_THRESHOLD">圧縮閾値 (0.00 〜 1.00)</label>
-              <div class="field-control">
-                <input id="COMPRESSION_THRESHOLD" name="COMPRESSION_THRESHOLD" type="range" step="0.01" min="0" max="1" />
-                <output id="COMPRESSION_THRESHOLD_VAL" for="COMPRESSION_THRESHOLD">0.00</output>
-              </div>
-            </div>
-            <!-- <div class="desc">テキスト系レスポンスを gzip 圧縮するか。閾値は圧縮後サイズ ÷ 元のサイズ（小さいほど圧縮が適用されやすい）。</div> -->
-          </div>
 
           <div class="field-group">
             <h3>画像変換設定</h3>
@@ -93,20 +80,36 @@
               </select>
             </div>
             <div class="row">
-              <label for="WEBP_EFFORT">WebP effort (0=最速 ... 6=最高圧縮)</label>
+              <label for="WEBP_EFFORT">effort (0=最速 ... 6=最高圧縮)</label>
               <div class="field-control">
                 <input id="WEBP_EFFORT" name="WEBP_EFFORT" type="range" step="1" min="0" max="6" />
                 <output id="WEBP_EFFORT_VAL" for="WEBP_EFFORT">1</output>
               </div>
             </div>
             <div class="row">
-              <label for="WEBP_EFFORT_FAST">WebP effort (高速モード用)</label>
+              <label for="WEBP_EFFORT_FAST">effort (高速モード用)</label>
               <div class="field-control">
-                <input id="WEBP_EFFORT_FAST" name="WEBP_EFFORT_FAST" type="range" step="1" min="0" max="4" />
+                <input id="WEBP_EFFORT_FAST" name="WEBP_EFFORT_FAST" type="range" step="1" min="0" max="2" />
                 <output id="WEBP_EFFORT_FAST_VAL" for="WEBP_EFFORT_FAST">0</output>
               </div>
             </div>
             <!-- <div class="desc">画像のリサイズ上限(px)、デフォルトの出力品質、処理モードを設定</div> -->
+          </div>
+
+          <div class="field-group">
+            <h3>レスポンス圧縮設定</h3>
+            <div class="row checkbox-row">
+              <label for="COMPRESSION_ENABLED">gzip 圧縮を有効にする</label>
+              <input id="COMPRESSION_ENABLED" name="COMPRESSION_ENABLED" type="checkbox" />
+            </div>
+            <div class="row">
+              <label for="COMPRESSION_THRESHOLD">圧縮閾値 (0.00 〜 1.00)</label>
+              <div class="field-control">
+                <input id="COMPRESSION_THRESHOLD" name="COMPRESSION_THRESHOLD" type="range" step="0.01" min="0" max="1" />
+                <output id="COMPRESSION_THRESHOLD_VAL" for="COMPRESSION_THRESHOLD">0.00</output>
+              </div>
+            </div>
+            <!-- <div class="desc">テキスト系レスポンスを gzip 圧縮するか。閾値は圧縮後サイズ ÷ 元のサイズ（小さいほど圧縮が適用されやすい）。</div> -->
           </div>
 
           <div class="field-group">
@@ -127,16 +130,16 @@
               </div>
             </div>
             <div class="row">
-              <label for="SHARP_MEMORY_LIMIT">Sharp メモリ制限 (128〜8192 MB)</label>
+              <label for="SHARP_MEMORY_LIMIT">Sharp メモリ制限 (128 〜 8192 MB)</label>
               <div class="field-control">
                 <input id="SHARP_MEMORY_LIMIT" name="SHARP_MEMORY_LIMIT" type="range" step="1" min="128" max="8192" />
                 <output id="SHARP_MEMORY_LIMIT_VAL" for="SHARP_MEMORY_LIMIT">512</output>
               </div>
             </div>
-            <div class="row">
+            <!-- <div class="row">
               <label for="SHARP_PIXEL_LIMIT">Sharp ピクセル上限</label>
               <input id="SHARP_PIXEL_LIMIT" name="SHARP_PIXEL_LIMIT" type="number" min="0" max="50000000" inputmode="numeric" pattern="[0-9]*" />
-            </div>
+            </div> -->
             <!-- <div class="desc">画像変換キャッシュの設定や Sharp ライブラリのメモリ・処理上限を調整</div> -->
           </div>
 
@@ -147,7 +150,7 @@
               <input id="PORT" name="PORT" type="number" min="1" max="65535" inputmode="numeric" pattern="[0-9]*" />
             </div>
             <div class="row">
-              <label for="ROOT_PATH">サーバー ルートパス</label>
+              <label for="ROOT_PATH">ルートパス</label>
               <input id="ROOT_PATH" name="ROOT_PATH" type="text" />
             </div>
             <div class="row">
@@ -285,6 +288,51 @@
     //  - 入力検証と未保存判定（dirty チェック）
     // 実行ロジックは元のままにし、可読性向上のためのコメントのみ追加しています。
   // ==========================================
+  /*
+    切り替えガイド（開発者向け）
+
+    現在の実装:
+      - 行の無効化は "出現/消滅"（CSS クラス `.row.hidden` を付け外し）で表現しています。
+        これは DOM 上で要素を完全に非表示にするため、ユーザーから見えなくなり、操作できなくなります。
+      - 元の実装（色でディアクティブ）はコメントアウトして残してあります（`.row.disabled` を付け外し）。
+
+    目的:
+      - すぐに元に戻せるよう、どの箇所を変更すればよいか手順を残します。
+
+    1) 元の（色でディアクティブ）方式に戻す手順（手動）
+       - 該当箇所: populateForm と init 内の各 toggle ロジック（COMPRESSION, IMAGE_MODE, RATE_LIMIT, RESTART）にあります。
+       - 例: 現在は以下のようになっています（出現/消滅）:
+           row.classList.add('hidden');
+           // row.classList.add('disabled');
+           webpFastRow.classList.remove('hidden');
+           // webpFastRow.classList.remove('disabled');
+       - 元に戻すには上記でコメント化されている行のコメントを外し、`hidden` の行をコメントアウトまたは削除してください:
+           // row.classList.add('hidden');
+           row.classList.add('disabled');
+           // webpFastRow.classList.remove('hidden');
+           webpFastRow.classList.remove('disabled');
+
+    2) アクセシビリティ向けに input の無効化（推奨）を追加する方法
+       - 視覚的に非表示にするだけでなく、関連する input 要素に対して `el.disabled = true/false` を切り替えると、キーボード操作やスクリーンリーダーに対しても明確になります。
+       - 例（toggle 関数内に追加）:
+           const slider = byId('COMPRESSION_THRESHOLD');
+           if (disable) {
+             row.classList.add('hidden');
+             if (slider) slider.disabled = true;  // ここを追加
+           } else {
+             row.classList.remove('hidden');
+             if (slider) slider.disabled = false; // ここを追加
+           }
+
+    3) 安全対策
+       - まずはコメントアウトで旧実装を残しています。動作確認後に不要であればコメント行を削除して整理してください。
+       - 変更は populateForm（初期反映）と init（ユーザー操作時）双方に反映してください。
+
+    参考: 変更箇所を grep したい場合のキーワード
+      - "classList.add('hidden')" / "classList.remove('hidden')"
+      - コメント化された旧行: "classList.add('disabled')" / "classList.remove('disabled')"
+
+  */
   // フォーム要素と設定キーのマッピング
     const keys = [
       'COMPRESSION_ENABLED','COMPRESSION_THRESHOLD',
@@ -387,8 +435,13 @@
           const compRow = compSlider ? compSlider.closest('.row') : null;
           const compFlag = byId('COMPRESSION_ENABLED');
           if (compRow && compFlag) {
-            if (compFlag.checked) compRow.classList.remove('disabled');
-            else compRow.classList.add('disabled');
+            if (compFlag.checked) {
+              compRow.classList.remove('hidden');
+              // compRow.classList.remove('disabled');
+            } else {
+              compRow.classList.add('hidden');
+              // compRow.classList.add('disabled');
+            }
           }
         } catch(e) {}
       } catch(e) {}
@@ -459,11 +512,15 @@
         if (imgMode && webpRow && webpFastRow) {
           // モード '1' = 高速モード (高速用 effort を有効にする)
           if (String(imgMode.value) === '1') {
-            webpRow.classList.add('disabled');
-            webpFastRow.classList.remove('disabled');
+            webpRow.classList.add('hidden');
+            // webpRow.classList.add('disabled');
+            webpFastRow.classList.remove('hidden');
+            // webpFastRow.classList.remove('disabled');
           } else {
-            webpRow.classList.remove('disabled');
-            webpFastRow.classList.add('disabled');
+            webpRow.classList.remove('hidden');
+            // webpRow.classList.remove('disabled');
+            webpFastRow.classList.add('hidden');
+            // webpFastRow.classList.add('disabled');
           }
         }
       } catch(e) {}
@@ -475,7 +532,7 @@
         const rQueue = byId('RATE_LIMIT_QUEUE_SIZE') ? byId('RATE_LIMIT_QUEUE_SIZE').closest('.row') : null;
         if (rateFlag && (rReq || rWin || rQueue)) {
           const disable = !rateFlag.checked;
-          [rReq, rWin, rQueue].forEach(r => { if (!r) return; if (disable) r.classList.add('disabled'); else r.classList.remove('disabled'); });
+          [rReq, rWin, rQueue].forEach(r => { if (!r) return; if (disable) { r.classList.add('hidden'); /* r.classList.add('disabled'); */ } else { r.classList.remove('hidden'); /* r.classList.remove('disabled'); */ } });
         }
       } catch(e) {}
   // RESTART_ENABLED に応じて自動再起動時刻入力を有効/無効化
@@ -483,7 +540,13 @@
         const restartFlag = byId('RESTART_ENABLED');
         const restartTimeRow = byId('RESTART_TIME') ? byId('RESTART_TIME').closest('.row') : null;
         if (restartFlag && restartTimeRow) {
-          if (restartFlag.checked) restartTimeRow.classList.remove('disabled'); else restartTimeRow.classList.add('disabled');
+          if (restartFlag.checked) {
+            restartTimeRow.classList.remove('hidden');
+            // restartTimeRow.classList.remove('disabled');
+          } else {
+            restartTimeRow.classList.add('hidden');
+            // restartTimeRow.classList.add('disabled');
+          }
         }
       } catch(e) {}
   // PHOTO_SIZE スライダー表示を更新 (px 表示)
@@ -717,8 +780,13 @@
           const toggleCompRow = () => {
             const row = compSlider.closest('.row');
             if (!row) return;
-            if (compFlag.checked) row.classList.remove('disabled');
-            else row.classList.add('disabled');
+            if (compFlag.checked) {
+              row.classList.remove('hidden');
+              // row.classList.remove('disabled');
+            } else {
+              row.classList.add('hidden');
+              // row.classList.add('disabled');
+            }
           };
           compFlag.addEventListener('change', () => { toggleCompRow(); checkDirty(); });
           // 初期状態を反映
@@ -863,12 +931,16 @@
         const toggleWebpRows = () => {
           if (!imgModeEl || !webpRow || !webpFastRow) return;
           if (String(imgModeEl.value) === '1') {
-            webpRow.classList.add('disabled');
-            webpFastRow.classList.remove('disabled');
-          } else {
-            webpRow.classList.remove('disabled');
-            webpFastRow.classList.add('disabled');
-          }
+              webpRow.classList.add('hidden');
+              // webpRow.classList.add('disabled');
+              webpFastRow.classList.remove('hidden');
+              // webpFastRow.classList.remove('disabled');
+            } else {
+              webpRow.classList.remove('hidden');
+              // webpRow.classList.remove('disabled');
+              webpFastRow.classList.add('hidden');
+              // webpFastRow.classList.add('disabled');
+            }
         };
         imgModeEl.addEventListener('change', () => { try { toggleWebpRows(); checkDirty(); } catch(e) {} });
         // 初期状態
@@ -884,7 +956,7 @@
         const toggleRateRows = () => {
           if (!rateFlag) return;
           const disable = !rateFlag.checked;
-          [rReq, rWin, rQueue].forEach(r => { if (!r) return; if (disable) r.classList.add('disabled'); else r.classList.remove('disabled'); });
+          [rReq, rWin, rQueue].forEach(r => { if (!r) return; if (disable) { r.classList.add('hidden'); /* r.classList.add('disabled'); */ } else { r.classList.remove('hidden'); /* r.classList.remove('disabled'); */ } });
         };
         if (rateFlag) {
           rateFlag.addEventListener('change', () => { try { toggleRateRows(); checkDirty(); } catch(e) {} });
@@ -898,7 +970,13 @@
         const restartTimeRow = byId('RESTART_TIME') ? byId('RESTART_TIME').closest('.row') : null;
         const toggleRestart = () => {
           if (!restartFlag || !restartTimeRow) return;
-          if (restartFlag.checked) restartTimeRow.classList.remove('disabled'); else restartTimeRow.classList.add('disabled');
+          if (restartFlag.checked) {
+            restartTimeRow.classList.remove('hidden');
+            // restartTimeRow.classList.remove('disabled');
+          } else {
+            restartTimeRow.classList.add('hidden');
+            // restartTimeRow.classList.add('disabled');
+          }
         };
         if (restartFlag) {
           restartFlag.addEventListener('change', () => { try { toggleRestart(); checkDirty(); } catch(e) {} });

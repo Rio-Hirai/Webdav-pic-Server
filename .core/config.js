@@ -102,6 +102,15 @@ function validateConfigValue(key, value, defaultValue) {
           return defaultValue;
         }
         break;
+      case 'WEBP_EFFORT':
+      case 'WEBP_EFFORT_FAST':
+        // Sharp の webp effort は 0-6 の範囲。
+        if (numValue < 0 || numValue > 6) {
+          logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (Sharp の effort は 0-6 の範囲)`);
+          return defaultValue;
+        }
+        return numValue; // 明示的に数値を返す
+        break;
       case 'CACHE_TTL_MS':
         if (numValue < 60000 || numValue > 86400000) {
           logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (キャッシュTTLは1分-24時間の範囲)`);
@@ -400,7 +409,11 @@ const getAggressiveDropWindow = () => getDynamicConfig('AGGRESSIVE_DROP_WINDOW_M
   const getServerRootPath = () => getDynamicConfig('ROOT_PATH', 'Z:/書籍'); // サーバールートパス
   
   // 画像処理モード設定読み込み関数
-  const getImageMode = () => getDynamicConfig('IMAGE_MODE', 2); // 画像処理モード（1=高速処理、2=バランス処理、3=高品質処理）
+  const getImageMode = () => getDynamicConfig('IMAGE_MODE', 2); // 画像処理モード（1=高速処理、2=バランス処理、3=高圧縮処理）
+
+  // WebP effort 設定 (0-9)
+  const getWebpEffort = () => parseInt(getDynamicConfig('WEBP_EFFORT', 1)); // デフォルト 1 (バランス)
+  const getWebpEffortFast = () => parseInt(getDynamicConfig('WEBP_EFFORT_FAST', 0)); // 高速モードのデフォルト 0
 
 module.exports = {
   logger,
@@ -430,4 +443,6 @@ module.exports = {
   getServerPort,
   getServerRootPath,
   getImageMode
+  ,getWebpEffort
+  ,getWebpEffortFast
 };

@@ -4,3 +4,4 @@ node_modules
 .backup/
 server.log
 webdav-server.pid
+comp.py

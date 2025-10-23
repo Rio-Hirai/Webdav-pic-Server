@@ -17,6 +17,9 @@
   <style>
   /* Toggle switch minimal styles (kept inline for small feature) */
   .checkbox-row { display:flex; align-items:center; gap:8px; }
+  /* 視覚的な無効（ディアクティブ）状態のスタイル */
+  .row.disabled { opacity: 0.5; }
+  .row.disabled .field-control { pointer-events: none; }
   .checkbox-row label { margin:0; }
   .checkbox-row input[type="checkbox"] { display:none; }
   .checkbox-row .switch { display:inline-block; width:44px; height:24px; background:var(--switch-off-bg); border-radius:999px; position:relative; transition:background .15s ease; margin-left:8px; }
@@ -60,11 +63,11 @@
               <label for="IMAGE_TEMPLATE">テンプレート</label>
               <select id="IMAGE_TEMPLATE" name="IMAGE_TEMPLATE">
                 <option value="">未選択</option>
+                <option value="hq">0 - 元画質</option>
                 <option value="smallest">1 - 最低画質</option>
                 <option value="small">2 - 低画質</option>
                 <option value="medium">3 - 中画質</option>
                 <option value="large">4 - 高画質</option>
-                <option value="hq">5 - 元画質</option>
               </select>
             </div>
             <div class="row">
@@ -86,8 +89,22 @@
               <select id="IMAGE_MODE" name="IMAGE_MODE">
                 <option value="1">1 - 高速（低負荷）</option>
                 <option value="2">2 - バランス</option>
-                <option value="3">3 - 高品質（高負荷）</option>
+                <option value="3">3 - 高圧縮（高負荷）</option>
               </select>
+            </div>
+            <div class="row">
+              <label for="WEBP_EFFORT">WebP effort (0=最速 ... 6=最高圧縮)</label>
+              <div class="field-control">
+                <input id="WEBP_EFFORT" name="WEBP_EFFORT" type="range" step="1" min="0" max="6" />
+                <output id="WEBP_EFFORT_VAL" for="WEBP_EFFORT">1</output>
+              </div>
+            </div>
+            <div class="row">
+              <label for="WEBP_EFFORT_FAST">WebP effort (高速モード用)</label>
+              <div class="field-control">
+                <input id="WEBP_EFFORT_FAST" name="WEBP_EFFORT_FAST" type="range" step="1" min="0" max="4" />
+                <output id="WEBP_EFFORT_FAST_VAL" for="WEBP_EFFORT_FAST">0</output>
+              </div>
             </div>
             <!-- <div class="desc">画像のリサイズ上限(px)、デフォルトの出力品質、処理モードを設定</div> -->
           </div>
@@ -221,7 +238,7 @@
           <strong>COMPRESSION_ENABLED</strong><br/>テキスト系レスポンスの gzip 圧縮を有効にします。<br/><br/>
           <strong>COMPRESSION_THRESHOLD</strong><br/>圧縮後のサイズ比 (compressed / original)。小さいほど圧縮が適用されやすくなります（例: 0.3）。<br/><br/>
           <strong>PHOTO_SIZE</strong><br/>画像変換時の最大ピクセル幅/高さ（px）。<br/><br/>
-          <strong>IMAGE_MODE</strong><br/>処理モード。1=高速, 2=バランス, 3=高品質（品質と負荷のトレードオフ）。<br/><br/>
+          <strong>IMAGE_MODE</strong><br/>処理モード。1=高速, 2=バランス, 3=高圧縮（品質と負荷のトレードオフ）。<br/><br/>
           <strong>CACHE_TTL_MS</strong><br/>キャッシュの有効期限（ミリ秒）。期限切れのキャッシュは定期的に削除されます。<br/><br/>
           <strong>SHARP_MEMORY_LIMIT</strong><br/>Sharp のメモリキャッシュ（MB）。システムの物理メモリに合わせて調整してください。<br/><br/>
           <strong>RATE_LIMIT_*</strong><br/>大量アクセス対策の設定（許可リクエスト数、ウィンドウ時間、キュー長など）。<br/>
@@ -272,9 +289,9 @@
     const keys = [
       'COMPRESSION_ENABLED','COMPRESSION_THRESHOLD',
       'PORT','ROOT_PATH','MAX_LIST',
-      'PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE',
-      'CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT',
-      'RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE',
+  'PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE',
+  'CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT','WEBP_EFFORT','WEBP_EFFORT_FAST',
+  'RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE',
       'EMERGENCY_DISABLE_RATE_LIMIT','STACK_MAX_SIZE','STACK_PROCESSING_DELAY_MS',
       'RESTART_ENABLED','RESTART_TIME','MAGICK_PATH'
     ];
@@ -365,6 +382,15 @@
           const n = Number(compSlider.value || 0);
           compOut.textContent = isNaN(n) ? '0.00' : n.toFixed(2);
         }
+        // 圧縮有効フラグに応じて圧縮閾値行を有効/無効化
+        try {
+          const compRow = compSlider ? compSlider.closest('.row') : null;
+          const compFlag = byId('COMPRESSION_ENABLED');
+          if (compRow && compFlag) {
+            if (compFlag.checked) compRow.classList.remove('disabled');
+            else compRow.classList.add('disabled');
+          }
+        } catch(e) {}
       } catch(e) {}
   // CACHE_TTL_MS（設定ファイルは ms）を UI 用に秒に変換
       try {
@@ -406,6 +432,58 @@
         if (qSlider && qOut) {
           const n = Number(qSlider.value || 50);
           qOut.textContent = isNaN(n) ? '50' : String(n);
+        }
+      } catch(e) {}
+  // WEBP_EFFORT と WEBP_EFFORT_FAST の表示更新
+      try {
+        const eSlider = byId('WEBP_EFFORT');
+        const eOut = byId('WEBP_EFFORT_VAL');
+        if (eSlider && eOut) {
+          const n = Number(eSlider.value || 1);
+          eOut.textContent = isNaN(n) ? '1' : String(Math.round(n));
+        }
+      } catch(e) {}
+      try {
+        const efSlider = byId('WEBP_EFFORT_FAST');
+        const efOut = byId('WEBP_EFFORT_FAST_VAL');
+        if (efSlider && efOut) {
+          const n = Number(efSlider.value || 0);
+          efOut.textContent = isNaN(n) ? '0' : String(Math.round(n));
+        }
+      } catch(e) {}
+  // IMAGE_MODE に応じて WebP effort の行を有効/無効化
+      try {
+        const imgMode = byId('IMAGE_MODE');
+        const webpRow = byId('WEBP_EFFORT') ? byId('WEBP_EFFORT').closest('.row') : null;
+        const webpFastRow = byId('WEBP_EFFORT_FAST') ? byId('WEBP_EFFORT_FAST').closest('.row') : null;
+        if (imgMode && webpRow && webpFastRow) {
+          // モード '1' = 高速モード (高速用 effort を有効にする)
+          if (String(imgMode.value) === '1') {
+            webpRow.classList.add('disabled');
+            webpFastRow.classList.remove('disabled');
+          } else {
+            webpRow.classList.remove('disabled');
+            webpFastRow.classList.add('disabled');
+          }
+        }
+      } catch(e) {}
+  // RATE_LIMIT_ENABLED に応じてレート制限関連行を有効/無効化
+      try {
+        const rateFlag = byId('RATE_LIMIT_ENABLED');
+        const rReq = byId('RATE_LIMIT_REQUESTS') ? byId('RATE_LIMIT_REQUESTS').closest('.row') : null;
+        const rWin = byId('RATE_LIMIT_WINDOW_MS') ? byId('RATE_LIMIT_WINDOW_MS').closest('.row') : null;
+        const rQueue = byId('RATE_LIMIT_QUEUE_SIZE') ? byId('RATE_LIMIT_QUEUE_SIZE').closest('.row') : null;
+        if (rateFlag && (rReq || rWin || rQueue)) {
+          const disable = !rateFlag.checked;
+          [rReq, rWin, rQueue].forEach(r => { if (!r) return; if (disable) r.classList.add('disabled'); else r.classList.remove('disabled'); });
+        }
+      } catch(e) {}
+  // RESTART_ENABLED に応じて自動再起動時刻入力を有効/無効化
+      try {
+        const restartFlag = byId('RESTART_ENABLED');
+        const restartTimeRow = byId('RESTART_TIME') ? byId('RESTART_TIME').closest('.row') : null;
+        if (restartFlag && restartTimeRow) {
+          if (restartFlag.checked) restartTimeRow.classList.remove('disabled'); else restartTimeRow.classList.add('disabled');
         }
       } catch(e) {}
   // PHOTO_SIZE スライダー表示を更新 (px 表示)
@@ -483,6 +561,7 @@
         ['COMPRESSION_ENABLED','COMPRESSION_THRESHOLD'],
         ['PORT','ROOT_PATH','MAX_LIST'],
         ['PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE'],
+        ['WEBP_EFFORT','WEBP_EFFORT_FAST'],
         ['CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT'],
         ['RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE'],
         ['EMERGENCY_DISABLE_RATE_LIMIT'],
@@ -630,6 +709,22 @@
         const ev = (el.type === 'checkbox' || el.tagName.toLowerCase() === 'select') ? 'change' : 'input';
         el.addEventListener(ev, () => checkDirty());
       }
+      // 圧縮有効チェックボックスが切り替わったときに圧縮閾値を有効/無効にする
+      try {
+        const compFlag = byId('COMPRESSION_ENABLED');
+        const compSlider = byId('COMPRESSION_THRESHOLD');
+        if (compFlag && compSlider) {
+          const toggleCompRow = () => {
+            const row = compSlider.closest('.row');
+            if (!row) return;
+            if (compFlag.checked) row.classList.remove('disabled');
+            else row.classList.add('disabled');
+          };
+          compFlag.addEventListener('change', () => { toggleCompRow(); checkDirty(); });
+          // 初期状態を反映
+          toggleCompRow();
+        }
+      } catch(e) {}
       // 圧縮閾値スライダーの配線: 出力と未保存状態を更新
       const compSlider = byId('COMPRESSION_THRESHOLD');
       const compOut = byId('COMPRESSION_THRESHOLD_VAL');
@@ -655,6 +750,30 @@
       if (qSlider) {
         qSlider.addEventListener('input', (e) => { updateQualityDisplay(e.target.value); checkDirty(); });
         updateQualityDisplay(qSlider.value || 50);
+      }
+      // WEBP_EFFORT スライダーの配線
+      const eSlider = byId('WEBP_EFFORT');
+      const eOut = byId('WEBP_EFFORT_VAL');
+      function updateWebpEffortDisplay(v){
+        const n = Number(v);
+        if (isNaN(n)) { if (eOut) eOut.textContent = '1'; return; }
+        if (eOut) eOut.textContent = String(Math.round(n));
+      }
+      if (eSlider) {
+        eSlider.addEventListener('input', (ev) => { updateWebpEffortDisplay(ev.target.value); checkDirty(); });
+        updateWebpEffortDisplay(eSlider.value || 1);
+      }
+      // WEBP_EFFORT_FAST スライダーの配線
+      const efSlider = byId('WEBP_EFFORT_FAST');
+      const efOut = byId('WEBP_EFFORT_FAST_VAL');
+      function updateWebpEffortFastDisplay(v){
+        const n = Number(v);
+        if (isNaN(n)) { if (efOut) efOut.textContent = '0'; return; }
+        if (efOut) efOut.textContent = String(Math.round(n));
+      }
+      if (efSlider) {
+        efSlider.addEventListener('input', (ev) => { updateWebpEffortFastDisplay(ev.target.value); checkDirty(); });
+        updateWebpEffortFastDisplay(efSlider.value || 0);
       }
       // PHOTO_SIZE スライダーの配線
       const pSlider = byId('PHOTO_SIZE');
@@ -697,9 +816,9 @@
       const templateSelect = byId('IMAGE_TEMPLATE');
       const templates = {
         smallest: { PHOTO_SIZE: '640', DEFAULT_QUALITY: '10', IMAGE_MODE: '1' },
-        small: { PHOTO_SIZE: '640', DEFAULT_QUALITY: '30', IMAGE_MODE: '1' },
+        small: { PHOTO_SIZE: '720', DEFAULT_QUALITY: '30', IMAGE_MODE: '1' },
         medium: { PHOTO_SIZE: '1040', DEFAULT_QUALITY: '50', IMAGE_MODE: '2' },
-        large: { PHOTO_SIZE: '1440', DEFAULT_QUALITY: '70', IMAGE_MODE: '2' },
+        large: { PHOTO_SIZE: '1440', DEFAULT_QUALITY: '70', IMAGE_MODE: '3' },
         hq: { PHOTO_SIZE: '2400', DEFAULT_QUALITY: '85', IMAGE_MODE: '3' }
       };
       if (templateSelect) {
@@ -722,6 +841,12 @@
               try {
                 if (typeof updatePhotoSizeDisplay === 'function' && pSlider) updatePhotoSizeDisplay(pSlider.value);
               } catch(e) {}
+              try {
+                if (typeof updateWebpEffortDisplay === 'function' && eSlider) updateWebpEffortDisplay(eSlider.value);
+              } catch(e) {}
+              try {
+                if (typeof updateWebpEffortFastDisplay === 'function' && efSlider) updateWebpEffortFastDisplay(efSlider.value);
+              } catch(e) {}
           try {
             if (typeof updateCompressionDisplay === 'function' && compSlider) updateCompressionDisplay(compSlider.value);
           } catch(e) {}
@@ -729,6 +854,57 @@
           try { checkDirty(); } catch(e) {}
         });
       }
+
+      // IMAGE_MODE の変更に応じて WEBP_EFFORT 行の有効/無効を切り替える
+      try {
+        const imgModeEl = byId('IMAGE_MODE');
+        const webpRow = byId('WEBP_EFFORT') ? byId('WEBP_EFFORT').closest('.row') : null;
+        const webpFastRow = byId('WEBP_EFFORT_FAST') ? byId('WEBP_EFFORT_FAST').closest('.row') : null;
+        const toggleWebpRows = () => {
+          if (!imgModeEl || !webpRow || !webpFastRow) return;
+          if (String(imgModeEl.value) === '1') {
+            webpRow.classList.add('disabled');
+            webpFastRow.classList.remove('disabled');
+          } else {
+            webpRow.classList.remove('disabled');
+            webpFastRow.classList.add('disabled');
+          }
+        };
+        imgModeEl.addEventListener('change', () => { try { toggleWebpRows(); checkDirty(); } catch(e) {} });
+        // 初期状態
+        toggleWebpRows();
+      } catch(e) {}
+
+      // RATE_LIMIT_ENABLED の切替でレート制限項目を有効/無効化
+      try {
+        const rateFlag = byId('RATE_LIMIT_ENABLED');
+        const rReq = byId('RATE_LIMIT_REQUESTS') ? byId('RATE_LIMIT_REQUESTS').closest('.row') : null;
+        const rWin = byId('RATE_LIMIT_WINDOW_MS') ? byId('RATE_LIMIT_WINDOW_MS').closest('.row') : null;
+        const rQueue = byId('RATE_LIMIT_QUEUE_SIZE') ? byId('RATE_LIMIT_QUEUE_SIZE').closest('.row') : null;
+        const toggleRateRows = () => {
+          if (!rateFlag) return;
+          const disable = !rateFlag.checked;
+          [rReq, rWin, rQueue].forEach(r => { if (!r) return; if (disable) r.classList.add('disabled'); else r.classList.remove('disabled'); });
+        };
+        if (rateFlag) {
+          rateFlag.addEventListener('change', () => { try { toggleRateRows(); checkDirty(); } catch(e) {} });
+          toggleRateRows();
+        }
+      } catch(e) {}
+
+      // RESTART_ENABLED の切替で再起動時刻入力を有効/無効化
+      try {
+        const restartFlag = byId('RESTART_ENABLED');
+        const restartTimeRow = byId('RESTART_TIME') ? byId('RESTART_TIME').closest('.row') : null;
+        const toggleRestart = () => {
+          if (!restartFlag || !restartTimeRow) return;
+          if (restartFlag.checked) restartTimeRow.classList.remove('disabled'); else restartTimeRow.classList.add('disabled');
+        };
+        if (restartFlag) {
+          restartFlag.addEventListener('change', () => { try { toggleRestart(); checkDirty(); } catch(e) {} });
+          toggleRestart();
+        }
+      } catch(e) {}
 
       // 固定バーボタンの配線（存在する場合）
       const btnSaveFixed = byId('btnSaveFixed');

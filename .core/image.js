@@ -18,7 +18,7 @@ const { promisify } = require("util");
 const { spawn } = require("child_process");
 const sharp = require("sharp");
 const pLimit = require("p-limit");
-const { logger, MAGICK_CMD, getSharpPixelLimit, getImageMode, getMaxConcurrency } = require("./config");
+const { logger, MAGICK_CMD, getSharpPixelLimit, getImageMode, getMaxConcurrency, getWebpEffort, getWebpEffortFast } = require("./config");
 
 const PassThrough = stream.PassThrough;
 const pipeline = promisify(stream.pipeline);
@@ -109,7 +109,7 @@ async function convertAndRespondWithLimit(params) {
  * 5. HTTPレスポンスへの直接ストリーミング
  */
 async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Photo_Size, res, clientIP }) {
-  // 画像処理モードを取得（1=高速処理、2=バランス処理、3=高品質処理）
+  // 画像処理モードを取得（1=高速処理、2=バランス処理、3=高圧縮処理）
   const imageMode = getImageMode();
   const isFast = imageMode === 1; // 高速処理モードかどうかを判定
 
@@ -144,7 +144,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        *
        * 技術的詳細:
        * - 高速処理モード: 幅基準の単純リサイズ（処理速度優先）
-       * - バランス/高品質モード: 縦横比較による最適リサイズ（見た目優先）
+       * - バランス/高圧縮モード: 縦横比較による最適リサイズ（見た目優先）
        * - withoutEnlargement: 元画像より大きくしない制限
        * - メタデータ取得: 画像サイズ情報の動的取得
        */
@@ -156,7 +156,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
             withoutEnlargement: true, // 元画像より大きくしない
           });
         } else {
-          // バランス/高品質モード: 縦横を比較して短辺に合わせる（見た目優先）
+          // バランス/高圧縮モード: 縦横を比較して短辺に合わせる（見た目優先）
           const meta = await transformer.metadata(); // メタデータ取得
           if (meta.width != null && meta.height != null) { // サイズ情報が取得できた場合のみ
             if (meta.width < meta.height) { // 短辺が幅の場合
@@ -184,11 +184,13 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * - nearLossless: 準可逆圧縮の無効化
        * - smartSubsample: スマートサブサンプリングの有効/無効
        */
+      // effort は設定から取得。高速モードと通常モードで別々の値を使える
+      const effortVal = isFast ? getWebpEffortFast() : getWebpEffort();
       transformer = transformer.webp({
         quality, // 品質設定（30-90）
-        effort: isFast ? 0 : 1, // 圧縮努力レベル（0=高速処理、1=バランス/高品質処理）
+        effort: effortVal, // 圧縮努力レベル（0=速い〜9=高圧縮）
         nearLossless: false, // 準可逆圧縮は無効
-        smartSubsample: isFast ? false : true, // スマートサブサンプリング（高速処理では無効、バランス/高品質処理では有効）
+        smartSubsample: isFast ? false : true, // スマートサブサンプリング（高速処理では無効、バランス/高圧縮処理では有効）
       });
 
       // Sharp変換にタイムアウトを設定（5秒）

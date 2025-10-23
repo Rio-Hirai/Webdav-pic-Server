@@ -24,6 +24,7 @@
         "stopall",
         "SUBPIC",
         "taskkill",
-        "webdav"
+        "webdav",
+        "WEBP"
     ]
 }

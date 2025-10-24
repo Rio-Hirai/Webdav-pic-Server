@@ -80,18 +80,41 @@
               </select>
             </div>
             <div class="row">
-              <label for="WEBP_EFFORT">effort (0=最速 ... 6=最高圧縮)</label>
+              <label for="WEBP_EFFORT">圧縮努力 (0=最速 ... 6=最高圧縮)</label>
               <div class="field-control">
                 <input id="WEBP_EFFORT" name="WEBP_EFFORT" type="range" step="1" min="0" max="6" />
                 <output id="WEBP_EFFORT_VAL" for="WEBP_EFFORT">1</output>
               </div>
             </div>
             <div class="row">
-              <label for="WEBP_EFFORT_FAST">effort (高速モード用)</label>
+              <label for="WEBP_EFFORT_FAST">圧縮努力 (高速モード用)</label>
               <div class="field-control">
                 <input id="WEBP_EFFORT_FAST" name="WEBP_EFFORT_FAST" type="range" step="1" min="0" max="2" />
                 <output id="WEBP_EFFORT_FAST_VAL" for="WEBP_EFFORT_FAST">0</output>
               </div>
+            </div>
+            <div class="row checkbox-row">
+              <label for="WEBP_DETAILED_ENABLED">詳細設定</label>
+              <input type="checkbox" id="WEBP_DETAILED_ENABLED" name="WEBP_DETAILED_ENABLED" />
+            </div>
+            <div class="row" id="webp-detailed-preset-row">
+              <label for="WEBP_PRESET">プリセット</label>
+              <select id="WEBP_PRESET" name="WEBP_PRESET">
+                <option value="default">default - 標準</option>
+                <option value="picture">picture - 写真向け</option>
+                <option value="photo">photo - 高品質写真</option>
+                <option value="drawing">drawing - 図面・イラスト</option>
+                <option value="icon">icon - アイコン</option>
+                <option value="text">text - テキスト</option>
+              </select>
+            </div>
+            <div class="row" id="webp-detailed-reduction-row">
+              <label for="WEBP_REDUCTION_EFFORT">削減努力 (0=無効 ... 6=最大)</label>
+              <div class="field-control">
+                <input id="WEBP_REDUCTION_EFFORT" name="WEBP_REDUCTION_EFFORT" type="range" step="1" min="0" max="6" />
+                <output id="WEBP_REDUCTION_EFFORT_VAL" for="WEBP_REDUCTION_EFFORT">0</output>
+              </div>
+              <!-- <div class="desc">WebPの色数削減・パレット最適化の努力レベル (0=無効 ... 6=最大)</div> -->
             </div>
             <!-- <div class="desc">画像のリサイズ上限(px)、デフォルトの出力品質、処理モードを設定</div> -->
           </div>
@@ -123,14 +146,14 @@
               <input id="CACHE_MIN_SIZE" name="CACHE_MIN_SIZE" type="number" min="0" inputmode="numeric" pattern="[0-9]*" />
             </div>
             <div class="row">
-              <label for="MAX_CONCURRENCY">同時処理数の上限（1〜32）</label>
+              <label for="MAX_CONCURRENCY">同時処理数の上限（1 〜 32）</label>
               <div class="field-control">
                 <input id="MAX_CONCURRENCY" name="MAX_CONCURRENCY" type="range" step="1" min="1" max="32" />
                 <output id="MAX_CONCURRENCY_VAL" for="MAX_CONCURRENCY">4</output>
               </div>
             </div>
             <div class="row">
-              <label for="SHARP_MEMORY_LIMIT">Sharp メモリ制限 (128 〜 8192 MB)</label>
+              <label for="SHARP_MEMORY_LIMIT">メモリ使用量の上限 (128 〜 8192 MB)</label>
               <div class="field-control">
                 <input id="SHARP_MEMORY_LIMIT" name="SHARP_MEMORY_LIMIT" type="range" step="1" min="128" max="8192" />
                 <output id="SHARP_MEMORY_LIMIT_VAL" for="SHARP_MEMORY_LIMIT">512</output>
@@ -300,33 +323,33 @@
       - すぐに元に戻せるよう、どの箇所を変更すればよいか手順を残します。
 
     1) 元の（色でディアクティブ）方式に戻す手順（手動）
-       - 該当箇所: populateForm と init 内の各 toggle ロジック（COMPRESSION, IMAGE_MODE, RATE_LIMIT, RESTART）にあります。
-       - 例: 現在は以下のようになっています（出現/消滅）:
-           row.classList.add('hidden');
+      - 該当箇所: populateForm と init 内の各 toggle ロジック（COMPRESSION, IMAGE_MODE, RATE_LIMIT, RESTART）にあります。
+      - 例: 現在は以下のようになっています（出現/消滅）:
+          row.classList.add('hidden');
            // row.classList.add('disabled');
-           webpFastRow.classList.remove('hidden');
+          webpFastRow.classList.remove('hidden');
            // webpFastRow.classList.remove('disabled');
-       - 元に戻すには上記でコメント化されている行のコメントを外し、`hidden` の行をコメントアウトまたは削除してください:
+      - 元に戻すには上記でコメント化されている行のコメントを外し、`hidden` の行をコメントアウトまたは削除してください:
            // row.classList.add('hidden');
-           row.classList.add('disabled');
+          row.classList.add('disabled');
            // webpFastRow.classList.remove('hidden');
-           webpFastRow.classList.remove('disabled');
+          webpFastRow.classList.remove('disabled');
 
     2) アクセシビリティ向けに input の無効化（推奨）を追加する方法
-       - 視覚的に非表示にするだけでなく、関連する input 要素に対して `el.disabled = true/false` を切り替えると、キーボード操作やスクリーンリーダーに対しても明確になります。
-       - 例（toggle 関数内に追加）:
-           const slider = byId('COMPRESSION_THRESHOLD');
-           if (disable) {
-             row.classList.add('hidden');
+      - 視覚的に非表示にするだけでなく、関連する input 要素に対して `el.disabled = true/false` を切り替えると、キーボード操作やスクリーンリーダーに対しても明確になります。
+      - 例（toggle 関数内に追加）:
+          const slider = byId('COMPRESSION_THRESHOLD');
+          if (disable) {
+            row.classList.add('hidden');
              if (slider) slider.disabled = true;  // ここを追加
-           } else {
-             row.classList.remove('hidden');
+          } else {
+            row.classList.remove('hidden');
              if (slider) slider.disabled = false; // ここを追加
-           }
+          }
 
     3) 安全対策
-       - まずはコメントアウトで旧実装を残しています。動作確認後に不要であればコメント行を削除して整理してください。
-       - 変更は populateForm（初期反映）と init（ユーザー操作時）双方に反映してください。
+      - まずはコメントアウトで旧実装を残しています。動作確認後に不要であればコメント行を削除して整理してください。
+      - 変更は populateForm（初期反映）と init（ユーザー操作時）双方に反映してください。
 
     参考: 変更箇所を grep したい場合のキーワード
       - "classList.add('hidden')" / "classList.remove('hidden')"
@@ -338,7 +361,7 @@
       'COMPRESSION_ENABLED','COMPRESSION_THRESHOLD',
       'PORT','ROOT_PATH','MAX_LIST',
   'PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE',
-  'CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT','WEBP_EFFORT','WEBP_EFFORT_FAST',
+  'CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT','WEBP_EFFORT','WEBP_EFFORT_FAST','WEBP_PRESET','WEBP_REDUCTION_EFFORT','WEBP_DETAILED_ENABLED',
   'RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE',
       'EMERGENCY_DISABLE_RATE_LIMIT','STACK_MAX_SIZE','STACK_PROCESSING_DELAY_MS',
       'RESTART_ENABLED','RESTART_TIME','MAGICK_PATH'
@@ -504,6 +527,14 @@
           efOut.textContent = isNaN(n) ? '0' : String(Math.round(n));
         }
       } catch(e) {}
+      try {
+        const reSlider = byId('WEBP_REDUCTION_EFFORT');
+        const reOut = byId('WEBP_REDUCTION_EFFORT_VAL');
+        if (reSlider && reOut) {
+          const n = Number(reSlider.value || 0);
+          reOut.textContent = isNaN(n) ? '0' : String(Math.round(n));
+        }
+      } catch(e) {}
   // IMAGE_MODE に応じて WebP effort の行を有効/無効化
       try {
         const imgMode = byId('IMAGE_MODE');
@@ -624,7 +655,7 @@
         ['COMPRESSION_ENABLED','COMPRESSION_THRESHOLD'],
         ['PORT','ROOT_PATH','MAX_LIST'],
         ['PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE'],
-        ['WEBP_EFFORT','WEBP_EFFORT_FAST'],
+        ['WEBP_EFFORT','WEBP_EFFORT_FAST','WEBP_PRESET','WEBP_REDUCTION_EFFORT','WEBP_DETAILED_ENABLED'],
         ['CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT'],
         ['RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE'],
         ['EMERGENCY_DISABLE_RATE_LIMIT'],
@@ -843,6 +874,18 @@
         efSlider.addEventListener('input', (ev) => { updateWebpEffortFastDisplay(ev.target.value); checkDirty(); });
         updateWebpEffortFastDisplay(efSlider.value || 0);
       }
+      // WEBP_REDUCTION_EFFORT スライダーの配線
+      const reSlider = byId('WEBP_REDUCTION_EFFORT');
+      const reOut = byId('WEBP_REDUCTION_EFFORT_VAL');
+      function updateWebpReductionEffortDisplay(v){
+        const n = Number(v);
+        if (isNaN(n)) { if (reOut) reOut.textContent = '0'; return; }
+        if (reOut) reOut.textContent = String(Math.round(n));
+      }
+      if (reSlider) {
+        reSlider.addEventListener('input', (ev) => { updateWebpReductionEffortDisplay(ev.target.value); checkDirty(); });
+        updateWebpReductionEffortDisplay(reSlider.value || 0);
+      }
       // PHOTO_SIZE スライダーの配線
       const pSlider = byId('PHOTO_SIZE');
       const pOut = byId('PHOTO_SIZE_VAL');
@@ -984,7 +1027,32 @@
         }
       } catch(e) {}
 
-      // 固定バーボタンの配線（存在する場合）
+      // WEBP_DETAILED_ENABLED の切替で詳細設定項目を有効/無効化
+      try {
+        const webpDetailedFlag = byId('WEBP_DETAILED_ENABLED');
+        const webpPresetRow = byId('webp-detailed-preset-row');
+        const webpReductionRow = byId('webp-detailed-reduction-row');
+        const toggleWebpDetailedRows = () => {
+          if (!webpDetailedFlag) return;
+          const disable = !webpDetailedFlag.checked;
+          [webpPresetRow, webpReductionRow].forEach(r => { 
+            if (!r) return; 
+            if (disable) { 
+              r.classList.add('hidden'); 
+              /* r.classList.add('disabled'); */ 
+            } else { 
+              r.classList.remove('hidden'); 
+              /* r.classList.remove('disabled'); */ 
+            } 
+          });
+        };
+        if (webpDetailedFlag) {
+          webpDetailedFlag.addEventListener('change', () => { try { toggleWebpDetailedRows(); checkDirty(); } catch(e) {} });
+          toggleWebpDetailedRows();
+        }
+      } catch(e) {}
+
+       // 固定バーボタンの配線（存在する場合）
       const btnSaveFixed = byId('btnSaveFixed');
       const btnLoadFixed = byId('btnLoadFixed');
       const statusFixed = byId('statusFixed');

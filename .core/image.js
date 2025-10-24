@@ -18,7 +18,7 @@ const { promisify } = require("util");
 const { spawn } = require("child_process");
 const sharp = require("sharp");
 const pLimit = require("p-limit");
-const { logger, MAGICK_CMD, getSharpPixelLimit, getImageMode, getMaxConcurrency, getWebpEffort, getWebpEffortFast } = require("./config");
+const { logger, MAGICK_CMD, getSharpPixelLimit, getImageMode, getMaxConcurrency, getWebpEffort, getWebpEffortFast, getWebpPreset, getWebpReductionEffort } = require("./config");
 
 const PassThrough = stream.PassThrough;
 const pipeline = promisify(stream.pipeline);
@@ -186,11 +186,15 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        */
       // effort は設定から取得。高速モードと通常モードで別々の値を使える
       const effortVal = isFast ? getWebpEffortFast() : getWebpEffort();
+      const presetVal = getWebpPreset(); // プリセット設定を取得
+      const reductionEffortVal = getWebpReductionEffort(); // reduction effort設定を取得
       transformer = transformer.webp({
         quality, // 品質設定（30-90）
         effort: effortVal, // 圧縮努力レベル（0=速い〜9=高圧縮）
+        preset: presetVal, // WebPプリセット設定
         nearLossless: false, // 準可逆圧縮は無効
         smartSubsample: isFast ? false : true, // スマートサブサンプリング（高速処理では無効、バランス/高圧縮処理では有効）
+        reductionEffort: reductionEffortVal, // WebP reduction effort設定
       });
 
       // Sharp変換にタイムアウトを設定（5秒）
@@ -207,10 +211,10 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
 
       // 初回のみ詳細ログを出力
       if (!global.imageConversionLogged) {
-        logger.info(`[変換実行] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality}) [メモリ: ${memUsageMB}MB, ピクセル制限: ${pixelLimit} (型: ${typeof pixelLimit})]`);
+        logger.info(`[変換実行] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal}) [メモリ: ${memUsageMB}MB, ピクセル制限: ${pixelLimit} (型: ${typeof pixelLimit})]`);
         global.imageConversionLogged = true;
       } else {
-        logger.info(`[変換実行] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality})`);
+        logger.info(`[変換実行] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal})`);
       }
 
       /**

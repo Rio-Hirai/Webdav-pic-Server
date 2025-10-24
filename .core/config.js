@@ -414,6 +414,12 @@ const getAggressiveDropWindow = () => getDynamicConfig('AGGRESSIVE_DROP_WINDOW_M
   // WebP effort 設定 (0-9)
   const getWebpEffort = () => parseInt(getDynamicConfig('WEBP_EFFORT', 1)); // デフォルト 1 (バランス)
   const getWebpEffortFast = () => parseInt(getDynamicConfig('WEBP_EFFORT_FAST', 0)); // 高速モードのデフォルト 0
+  
+  // WebP preset 設定
+  const getWebpPreset = () => getDynamicConfig('WEBP_PRESET', 'default'); // デフォルト 'default'
+  
+  // WebP reduction effort 設定
+  const getWebpReductionEffort = () => parseInt(getDynamicConfig('WEBP_REDUCTION_EFFORT', 0)); // デフォルト 0
 
 module.exports = {
   logger,
@@ -442,7 +448,9 @@ module.exports = {
   getEmergencyResetWindow,
   getServerPort,
   getServerRootPath,
-  getImageMode
-  ,getWebpEffort
-  ,getWebpEffortFast
+  getImageMode,
+  getWebpEffort,
+  getWebpEffortFast,
+  getWebpPreset,
+  getWebpReductionEffort
 };

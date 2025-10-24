@@ -783,7 +783,7 @@ function startWebDAV(activeCacheDir) {
                 }
                 headers = headers || {};
 
-                // Content-Typeを確認
+                // Content-Typeを確認（画像ファイルは除外）
                 const contentType =
                   headers["content-type"] ||
                   res.getHeader("content-type") ||
@@ -793,9 +793,16 @@ function startWebDAV(activeCacheDir) {
                   contentType.includes("html") ||
                   contentType.includes("json") ||
                   contentType.includes("text");
+                
+                // 画像ファイルは圧縮対象から除外
+                const isImageResponse =
+                  contentType.includes("image/") ||
+                  contentType.includes("video/") ||
+                  contentType.includes("audio/") ||
+                  contentType.includes("application/octet-stream");
 
-                if (isTextResponse) {
-                  // テキストレスポンスの場合は圧縮準備
+                if (isTextResponse && !isImageResponse) {
+                  // テキストレスポンスで画像ファイル以外の場合は圧縮準備
                   headers["Vary"] = "Accept-Encoding";
                 }
 
@@ -844,12 +851,19 @@ function startWebDAV(activeCacheDir) {
                   contentType.includes("html") ||
                   contentType.includes("json") ||
                   contentType.includes("text");
+                
+                // 画像ファイルは圧縮対象から除外
+                const isImageResponse =
+                  contentType.includes("image/") ||
+                  contentType.includes("video/") ||
+                  contentType.includes("audio/") ||
+                  contentType.includes("application/octet-stream");
 
                 // 最小サイズ制限（1KB未満は圧縮しない）
                 const MIN_COMPRESS_SIZE = 1024;
-                if (!isTextResponse || fullData.length < MIN_COMPRESS_SIZE) {
+                if (!isTextResponse || isImageResponse || fullData.length < MIN_COMPRESS_SIZE) {
                   logger.info(
-                    `[圧縮スキップ] ${displayPath} - 条件未満: テキスト=${isTextResponse}, サイズ=${fullData.length}`,
+                    `[圧縮スキップ] ${displayPath} - 条件未満: テキスト=${isTextResponse}, 画像=${isImageResponse}, サイズ=${fullData.length}`,
                   );
                   return originalEnd.call(this, fullData);
                 }
@@ -915,12 +929,26 @@ function startWebDAV(activeCacheDir) {
             ".txt",
             ".md",
           ];
+          const imageExts = [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".webp",
+            ".bmp",
+            ".tiff",
+            ".tif",
+            ".avif",
+            ".svg",
+          ];
           const isTextFile = textExts.includes(ext.toLowerCase());
+          const isImageFile = imageExts.includes(ext.toLowerCase());
 
           if (
             getCompressionEnabled() &&
             req.method === "GET" &&
             isTextFile &&
+            !isImageFile &&
             typeof res.setHeader === "function"
           ) {
             // 圧縮対応の確認

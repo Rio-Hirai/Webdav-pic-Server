@@ -21,7 +21,7 @@
 
 /* 固定バーの後ろにコンテンツが隠れないよう、バーの高さに等しいスペースを確保 */
 /* 固定バー（高さ約120px + パディング）の分だけ下部に余白を追加 */
-.container{padding-bottom:140px}
+.container{padding-bottom:150px}
 
 /* 基本ボディスタイル
    - システムフォントを優先（OSに応じた最適なフォント）
@@ -343,14 +343,14 @@ body, .card, pre { transition: background-color 220ms ease, color 220ms ease, bo
 /* 画面下部に固定される保存バー
    - 常に表示されてアクセシビリティを向上
    - 影で浮いているような視覚効果 */
-.fixed-bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);box-shadow:0 -6px 18px rgba(0,0,0,0.08);padding:10px 12px;z-index:70}
+.fixed-bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);box-shadow:0 -6px 18px rgba(0,0,0,0.08);padding:16px 12px;z-index:70}
 /* 固定バー内部のレイアウト
    - 最大幅980pxで中央配置
    - 右端にボタンを配置 */
 .fixed-bar-inner{max-width:980px;margin:0 auto;display:flex;gap:8px;align-items:center;justify-content:flex-end}
 /* 固定バー内のボタンスタイル */
-.fixed-bar .btn-primary{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:6px}
-.fixed-bar .btn-ghost{background:var(--ghost-bg);color:var(--text);border:1px solid transparent}
+.fixed-bar .btn-primary{background:var(--accent);color:#fff;border:none;padding:12px 16px;border-radius:6px}
+.fixed-bar .btn-ghost{background:var(--ghost-bg);color:var(--text);border:1px solid transparent;padding:12px 16px}
 /* 固定バー内のステータス表示 */
 .fixed-bar .status{margin-left:10px;color:var(--muted)}
 
@@ -369,5 +369,5 @@ body, .card, pre { transition: background-color 220ms ease, color 220ms ease, bo
 	/* 小さな画面でテーマトグルボタンを少し狭めて、全幅にまたがらないようにする */
 	/* テーマトグルのサイズ制限
 	   - 最小60px、最大100pxで適切なサイズを保持 */
-	.fixed-bar #themeToggle{ flex: 0 0 auto; min-width: 60px; max-width: 100px; padding: 10px 12px; }
+	.fixed-bar #themeToggle{ flex: 0 0 auto; min-width: 60px; max-width: 100px; padding: 12px 16px; }
 }

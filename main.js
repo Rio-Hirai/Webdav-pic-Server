@@ -8,7 +8,7 @@ const os = require("os"); // OS情報取得 - CPU数、メモリ情報、プラ�
 const stream = require("stream"); // ストリーム処理 - PassThrough、pipeline等のストリーム操作、メモリ効率化
 const { promisify } = require("util"); // コールバック→Promise変換 - 非同期処理の統一化、pipelineのPromise化
 const { execFile, spawn } = require("child_process"); // 外部プロセス実行 - ImageMagick等の外部コマンド呼び出し、フォールバック処理
-const zlib = require("zlib"); // 圧縮処理（現在未使用） - gzip/deflate圧縮、将来のHTTP圧縮対応用
+const zlib = require("zlib"); // レスポンス圧縮処理 - gzip/deflate圧縮
 
 // 外部ライブラリ
 const sharp = require("sharp"); // 高性能画像変換ライブラリ - libvipsベース、WebP/JPEG/PNG変換、メタデータ取得、回転補正

@@ -34,6 +34,7 @@
     "pino": "^9.7.0",
     "pino-pretty": "^13.1.1",
     "sharp": "^0.34.1",
-    "webdav-server": "^2.6.2"
+    "webdav-server": "^2.6.2",
+    "iltorb": "^2.4.5"
   }
 }

@@ -5,3 +5,4 @@ node_modules
 server.log
 webdav-server.pid
 comp.py
+logs/

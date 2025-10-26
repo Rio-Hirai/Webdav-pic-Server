@@ -95,7 +95,7 @@ async function convertAndRespondWithLimit(params) {
  * @param {string} params.fullPath - 変換対象画像のフルパス
  * @param {string} params.displayPath - 表示用パス（ログ出力用）
  * @param {string|null} params.cachePath - キャッシュファイルパス（null=キャッシュなし）
- * @param {number} params.quality - WebP変換品質（30-90）
+ * @param {number} params.quality - WebP変換品質（10-100）
  * @param {number|null} params.Photo_Size - リサイズサイズ（null=リサイズなし）
  * @param {Object} params.res - HTTPレスポンスオブジェクト
  *
@@ -179,7 +179,7 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * 品質と処理速度のバランスを調整
        *
        * 技術的詳細:
-       * - quality: 圧縮品質（30-90の範囲）
+       * - quality: 圧縮品質（10-100の範囲）
        * - effort: 圧縮努力レベル（0=高速、1=標準）
        * - nearLossless: 準可逆圧縮の無効化
        * - smartSubsample: スマートサブサンプリングの有効/無効
@@ -189,8 +189,8 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
       const presetVal = getWebpPreset(); // プリセット設定を取得
       const reductionEffortVal = getWebpReductionEffort(); // reduction effort設定を取得
       transformer = transformer.webp({
-        quality, // 品質設定（30-90）
-        effort: effortVal, // 圧縮努力レベル（0=速い〜9=高圧縮）
+        quality, // 品質設定（10-100）
+        effort: effortVal, // 圧縮努力レベル（0=速い〜6=高圧縮）
         preset: presetVal, // WebPプリセット設定
         nearLossless: false, // 準可逆圧縮は無効
         smartSubsample: isFast ? false : true, // スマートサブサンプリング（高速処理では無効、バランス/高圧縮処理では有効）

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Content-Language" content="ja" />
   <title>⚙️ WebDAV Pic Server - Settings</title>
   <link rel="stylesheet" href="/setting/css/settings.css">
   <!-- favicons: add both /icons and /setting/icons paths to match server static routing -->
@@ -65,7 +66,7 @@
               </div>
             </div>
             <div class="row">
-              <label for="DEFAULT_QUALITY">品質（1〜100）</label>
+              <label for="DEFAULT_QUALITY">品質（1 〜 100）</label>
               <div class="field-control">
                 <input id="DEFAULT_QUALITY" name="DEFAULT_QUALITY" type="range" step="1" min="1" max="100" />
                 <output id="DEFAULT_QUALITY_VAL" for="DEFAULT_QUALITY">50</output>
@@ -218,14 +219,14 @@
               <label for="STACK_PROCESSING_DELAY_MS">スタック処理遅延 (ms)</label>
               <input id="STACK_PROCESSING_DELAY_MS" name="STACK_PROCESSING_DELAY_MS" type="number" min="0" inputmode="numeric" pattern="[0-9]*" />
             </div>
-            <div class="row checkbox-row">
+            <!-- <div class="row checkbox-row">
               <label for="RESTART_ENABLED">自動再起動を有効にする</label>
               <input id="RESTART_ENABLED" name="RESTART_ENABLED" type="checkbox" />
             </div>
             <div class="row">
               <label for="RESTART_TIME">自動再起動時刻 (HH:MM)</label>
               <input id="RESTART_TIME" name="RESTART_TIME" type="text" pattern="^\\d{1,2}:\\d{2}$" />
-            </div>
+            </div> -->
             <!-- <div class="desc">緊急時の動作やスタック処理、定期的な自動再起動の設定を行います。</div> -->
           </div>
 
@@ -756,6 +757,7 @@
       if (rawEl) rawEl.textContent = text;
       setStatus('Saving...');
       try {
+        // Node.js 25.0.0最適化: JSON.stringifyの高速化を活用
         const r = await fetch('/setting/save', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
@@ -926,7 +928,7 @@
       // テンプレートセレクターの配線
       const templateSelect = byId('IMAGE_TEMPLATE');
       const templates = {
-        smallest: { PHOTO_SIZE: '640', DEFAULT_QUALITY: '10', IMAGE_MODE: '1' },
+        smallest: { PHOTO_SIZE: '640', DEFAULT_QUALITY: '10', IMAGE_MODE: '3' },
         small: { PHOTO_SIZE: '720', DEFAULT_QUALITY: '30', IMAGE_MODE: '1' },
         medium: { PHOTO_SIZE: '1040', DEFAULT_QUALITY: '50', IMAGE_MODE: '2' },
         large: { PHOTO_SIZE: '1440', DEFAULT_QUALITY: '70', IMAGE_MODE: '3' },

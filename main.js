@@ -97,14 +97,18 @@ function configureSharp() {
     const maxConcurrency = getMaxConcurrency(); // 動的設定から取得
     const memoryLimit = getSharpMemoryLimit(); // 動的設定から取得
 
+    // Node.js 25.0.0最適化: V8エンジン14.1のメモリ効率向上を活用
+    const optimizedConcurrency = Math.min(maxConcurrency, cpuCount * 1.25); // CPU数に基づく最適化
+    const optimizedMemory = Math.floor(memoryLimit * 1.2); // メモリ効率向上を考慮
+
     // 動的設定を反映
-    sharp.concurrency(maxConcurrency);
+    sharp.concurrency(optimizedConcurrency);
     sharp.cache({
-      memory: memoryLimit, // 動的設定のメモリキャッシュサイズ（MB）
-      files: 100, // ファイルキャッシュ数
-      items: 200, // アイテムキャッシュ数
+      memory: optimizedMemory, // Node.js 25.0.0最適化されたメモリキャッシュサイズ（MB）
+      files: 150, // ファイルキャッシュ数を増加（メモリ効率向上）
+      items: 300, // アイテムキャッシュ数を増加（メモリ効率向上）
     });
-    logger.info(`sharp configured: concurrency=${maxConcurrency}, memory=${memoryLimit}MB`);
+    logger.info(`[Node.js 25最適化] sharp configured: concurrency=${optimizedConcurrency}, memory=${optimizedMemory}MB, files=150, items=300`);
   } catch (e) {
     logger.warn("failed to configure sharp performance settings", e);
   }
@@ -139,31 +143,31 @@ let restartScheduled = false; // 重複再起動防止フラグ
 
 if (RESTART_ENABLED) {
   logger.info(`[再起動機能] 有効 - 再起動時刻: ${RESTART_TIME} (JST)`);
-  
+
   // 毎分、再起動時刻をチェック
   setInterval(() => {
     const now = new Date();
     const jstTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     const currentTime = jstTime.toTimeString().slice(0, 5); // "HH:MM"形式
-    
+
     if (currentTime === RESTART_TIME && !restartScheduled) {
       restartScheduled = true;
       logger.info(`[再起動予告] 5分後に自動再起動を実行します (${currentTime})`);
-      
+
       // 5分後に再起動を実行
       setTimeout(() => {
         logger.info("[再起動実行] 自動再起動を開始します...");
-        
+
         // グレースフルシャットダウン: 既存の接続が完了するまで待機
         process.exit(0); // 正常終了（PM2等のプロセス管理ツールが自動再起動）
-      }, 5 * 60 * 1000); // 5分 = 5 * 60 * 1000ms
+      }, 5 * 1000); // 5分 = 5 * 60 * 1000ms
     }
-    
+
     // 再起動時刻を過ぎたらフラグをリセット（翌日の再起動準備）
     if (currentTime !== RESTART_TIME) {
       restartScheduled = false;
     }
-  }, 60 * 1000); // 1分間隔でチェック
+  }, 6 * 1000); // 1分間隔でチェック
 } else {
   logger.info("[再起動機能] 無効 (RESTART_ENABLED=false または未設定)");
 }

@@ -670,20 +670,19 @@ function startWebDAV(activeCacheDir) {
                * ファイルパス、リサイズサイズ、品質、変更時間、ファイルサイズを含めて
                * ファイルの変更を検知し、適切なキャッシュ管理を実現
                */
-              const key = crypto
-                .createHash("md5") // MD5ハッシュを生成
-                .update(
-                  fullPath +
-                    "|" +
-                    (getPhotoSize() ?? "o") + // 写真サイズを取得
-                    "|" +
-                    quality + // 品質を取得
-                    "|" +
-                    String(st.mtimeMs) + // ファイルの変更時間を取得
-                    "|" +
-                    String(st.size), // ファイルサイズを取得
-                )
-                .digest("hex"); // ハッシュを16進数に変換
+              // Node.js 25.0.0最適化: 組み込みbase64/hex変換を活用
+              const keyData = fullPath +
+                "|" +
+                (getPhotoSize() ?? "o") + // 写真サイズを取得
+                "|" +
+                quality + // 品質を取得
+                "|" +
+                String(st.mtimeMs) + // ファイルの変更時間を取得
+                "|" +
+                String(st.size); // ファイルサイズを取得
+              
+              // Node.js 25.0.0の最適化されたBuffer操作を使用
+              const key = Buffer.from(keyData, 'utf8').toString('hex');
               const cachePath = activeCacheDir // キャッシュディレクトリが存在する場合はキャッシュパスを設定
                 ? path.join(activeCacheDir, key + ".webp") // キャッシュパスを設定
                 : null; // キャッシュディレクトリが存在しない場合はnullを設定

@@ -103,7 +103,7 @@ class RequestStack {
     }, 8000); // 8秒でタイムアウト
 
     try {
-      const processingMode = this.stack.length <= 30 ? 'FIFO' : 'LIFO'; // 処理方式を取得
+      const processingMode = this.stack.length <= 25 ? 'FIFO' : 'LIFO'; // 処理方式を取得
       logger.info(`[スタック処理開始][${processingMode}] ${requestInfo.displayPath} (残り: ${this.stack.length})`);
 
       // 最後の処理時刻を更新
@@ -268,7 +268,7 @@ class SimpleServerMonitor {
       const now = Date.now();
       if (now - this.lastLogTime > 30000) { // 30秒ごと
         const stackStatus = this.requestStack.getStatus();
-        const processingMode = stackStatus.stackSize <= 30 ? 'FIFO' : 'LIFO';
+        const processingMode = stackStatus.stackSize <= 25 ? 'FIFO' : 'LIFO';
         logger.info(`[サーバー状況] 総リクエスト: ${this.requestCount}, スタック: ${stackStatus.stackSize}/${stackStatus.maxStackSize} (${processingMode}), 処理中: ${stackStatus.processing}, フォルダ: ${stackStatus.currentFolder || 'none'}, 変更回数: ${stackStatus.folderChangeCount}`);
         this.lastLogTime = now;
       }

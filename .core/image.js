@@ -113,6 +113,15 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
   const imageMode = getImageMode();
   const isFast = imageMode === 1; // 高速処理モードかどうかを判定
 
+  // HEIC画像の検出とImageMagickへの直接ルーティング
+  const fileExt = path.extname(fullPath).toLowerCase();
+  const isHeicImage = fileExt === '.heic' || fileExt === '.heif';
+
+  if (isHeicImage) {
+    logger.info(`[HEIC画像検出] ImageMagickに直接ルーティング: ${displayPath}`);
+    return convertHeicWithImageMagick({ fullPath, displayPath, cachePath, quality, Photo_Size, res, clientIP });
+  }
+
   // Promise を返すことで呼び出し側が完了を待てるようにする
   return new Promise(async (resolve, reject) => {
     /**
@@ -889,6 +898,396 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
 }
 
 /**
+ * HEIC画像専用ImageMagick変換関数
+ * HEIC画像を一発でImageMagickにルーティングしてWebP変換
+ *
+ * @param {Object} params - 変換パラメータ
+ * @param {string} params.fullPath - 変換対象HEIC画像のフルパス
+ * @param {string} params.displayPath - 表示用パス（ログ出力用）
+ * @param {string|null} params.cachePath - キャッシュファイルパス（null=キャッシュなし）
+ * @param {number} params.quality - WebP変換品質（10-100）
+ * @param {number|null} params.Photo_Size - リサイズサイズ（null=リサイズなし）
+ * @param {Object} params.res - HTTPレスポンスオブジェクト
+ * @param {string} params.clientIP - クライアントIP（ログ用）
+ *
+ * @returns {Promise<void>} 変換完了時にresolve
+ */
+async function convertHeicWithImageMagick({ fullPath, displayPath, cachePath, quality, Photo_Size, res, clientIP }) {
+  return new Promise(async (resolve, reject) => {
+    // 画像処理モードを取得（Sharpと同じ設定を使用）
+    const imageMode = getImageMode();
+    const isFast = imageMode === 1; // 高速処理モードかどうかを判定
+
+    /**
+     * 原子的キャッシュ更新のための一時ファイルパス生成
+     * キャッシュファイルの書き込み中に他のプロセスが読み込むことを防ぐ
+     */
+    const tmpPath = cachePath ? cachePath + `.tmp-${crypto.randomBytes(6).toString("hex")}` : null;
+
+    // Sharpと同じWebP設定を取得
+    const effortVal = isFast ? getWebpEffortFast() : getWebpEffort();
+    const presetVal = getWebpPreset();
+    const reductionEffortVal = getWebpReductionEffort();
+
+    // メモリ使用量の監視（Sharpと同じ診断情報）
+    const memUsage = process.memoryUsage();
+    const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+
+    // HEIC変換開始の詳細ログ
+    logger.info(`[HEIC変換開始] ${displayPath} → ${cachePath ?? "(no cache)"} (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal}, effort=${effortVal}, mode=${imageMode}) [メモリ: ${memUsageMB}MB]`);
+
+    /**
+     * ImageMagickコマンドライン引数の構築（Sharpの設定を流用）
+     * - resize: Photo_Sizeが指定されている場合のみリサイズ（Sharpと同じロジック）
+     * - quality: WebP品質設定（Sharpと同じ）
+     * - webp:-: 標準出力にWebP形式で出力
+     * - SharpのWebP設定をImageMagickオプションに変換
+     *
+     * 技術的詳細:
+     * - spawn使用: ストリーミング処理によるメモリ効率化
+     * - 標準出力: パイプによるデータ転送
+     * - エラーハンドリング: プロセス失敗時の適切な処理
+     * - リソース管理: プロセス終了時の自動クリーンアップ
+     */
+    let resizeOpt = [];
+    if (Photo_Size) {
+      if (isFast) {
+        // 高速処理モード: 幅を基準に単純リサイズ（Sharpと同じロジック）
+        resizeOpt = ["-resize", `${Photo_Size}x`];
+      } else {
+        // バランス/高圧縮モード: 縦横を比較して短辺に合わせる（Sharpと同じロジック）
+        try {
+          // ImageMagickでメタデータを取得してサイズ判定
+          logger.info(`[HEIC メタデータ取得] ${displayPath} - サイズ判定のためidentify実行`);
+          const identifyCmd = spawn(MAGICK_CMD, ["identify", "-format", "%wx%h", fullPath]);
+          let identifyOutput = '';
+          identifyCmd.stdout.on('data', (chunk) => {
+            identifyOutput += chunk.toString();
+          });
+          
+          await new Promise((identifyResolve, identifyReject) => {
+            identifyCmd.on('close', (code) => {
+              if (code === 0) {
+                const [width, height] = identifyOutput.trim().split('x').map(Number);
+                logger.info(`[HEIC メタデータ取得完了] ${displayPath} - サイズ: ${width}x${height}`);
+                if (width < height) {
+                  // 短辺が幅の場合
+                  resizeOpt = ["-resize", `${Photo_Size}x`];
+                  logger.info(`[HEIC リサイズ設定] 幅基準: ${Photo_Size}x`);
+                } else {
+                  // 短辺が高さの場合
+                  resizeOpt = ["-resize", `x${Photo_Size}`];
+                  logger.info(`[HEIC リサイズ設定] 高さ基準: x${Photo_Size}`);
+                }
+                identifyResolve();
+              } else {
+                // メタデータ取得失敗時は幅基準でリサイズ
+                logger.warn(`[HEIC メタデータ取得失敗] ${displayPath} - 幅基準でリサイズ`);
+                resizeOpt = ["-resize", `${Photo_Size}x`];
+                identifyResolve();
+              }
+            });
+            identifyCmd.on('error', (err) => {
+              // エラー時は幅基準でリサイズ
+              logger.warn(`[HEIC メタデータ取得エラー] ${displayPath} - ${err.message}, 幅基準でリサイズ`);
+              resizeOpt = ["-resize", `${Photo_Size}x`];
+              identifyResolve();
+            });
+          });
+        } catch (e) {
+          // 例外時は幅基準でリサイズ
+          logger.warn(`[HEIC メタデータ取得例外] ${displayPath} - ${e.message}, 幅基準でリサイズ`);
+          resizeOpt = ["-resize", `${Photo_Size}x`];
+        }
+      }
+    }
+
+    // ImageMagickのWebPオプション構築（Sharpの設定を反映）
+    const webpOptions = [
+      "-quality", `${quality}`,
+      "-define", `webp:effort=${effortVal}`,
+      "-define", `webp:preset=${presetVal}`,
+      "-define", `webp:reduction-effort=${reductionEffortVal}`,
+      "-define", "webp:near-lossless=false"
+    ];
+    
+    if (!isFast) {
+      // バランス/高圧縮モードではスマートサブサンプリングを有効
+      webpOptions.push("-define", "webp:smart-subsample=true");
+    }
+
+    const magick = spawn(MAGICK_CMD, [fullPath, ...resizeOpt, ...webpOptions, "webp:-"]); // ImageMagickプロセスを起動
+
+    // ImageMagickプロセス開始のログ
+    logger.info(`[HEIC ImageMagick起動] コマンド: ${MAGICK_CMD} ${[fullPath, ...resizeOpt, ...webpOptions, "webp:-"].join(' ')}`);
+
+    // ImageMagickプロセスのエラーハンドリング
+    magick.on("error", (err) => {
+      logger.error(`[HEIC ImageMagick変換失敗] ${fullPath}: ${err}`); // エラーログを出力
+
+      // ImageMagick失敗時は元画像を直接送信
+      logger.info(`[HEIC ImageMagick失敗→元画像送信] ${displayPath}`);
+
+      // HTTPヘッダー設定（まだ送信されていない場合）
+      if (!res.headersSent) {
+        res.setHeader("Content-Type", "image/heic"); // HEIC画像のMIMEタイプ
+      }
+
+      // 元画像ファイルを直接ストリーミング
+      const fileStream = fs.createReadStream(fullPath);
+      fileStream.pipe(res);
+
+      fileStream.on("error", (streamErr) => {
+        logger.error(`[HEIC元画像送信失敗] ${displayPath}: ${streamErr.message}`);
+        if (!res.headersSent) res.writeHead(500);
+        res.end("Failed to read original HEIC image");
+        return reject(streamErr);
+      });
+
+      fileStream.on("end", () => {
+        logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+        res.end();
+        return resolve();
+      });
+    });
+
+    // HTTPヘッダー設定（まだ送信されていない場合）
+    if (!res.headersSent) {
+      res.setHeader("Content-Type", "image/webp"); // WebP画像のMIMEタイプ
+    }
+
+    if (tmpPath) {
+      // キャッシュファイルへの書き込み処理（権限チェック付き）
+      try {
+        // 親ディレクトリの存在確認と作成
+        const tmpDir = path.dirname(tmpPath);
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+
+        const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルへの書き込みストリーム
+
+        // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
+        pipeline(magick.stdout, writeStream).catch((e) => {
+          // Premature closeエラーは頻発するため、ログレベルを調整
+          if (e.message && e.message.includes('Premature close')) {
+            logger.info(`[HEIC magick->tmp pipeline] ${e.message}`);
+            // Premature closeの場合はImageMagickプロセスを終了
+            if (magick && !magick.killed) {
+              try {
+                magick.kill('SIGTERM');
+                logger.info(`[HEIC ImageMagick強制終了(Premature close)] ${displayPath}`);
+              } catch (killErr) {
+                // プロセス終了エラーは無視
+              }
+            }
+          } else {
+            logger.error(`[HEIC magick->tmp pipeline error] ${e.message}`);
+          }
+          // キャッシュ書き込み失敗時はキャッシュなしで続行
+        });
+        magick.stdout.pipe(res, { end: false }); // レスポンスは手動で終了
+
+        // ImageMagickの標準出力エラーハンドリング
+        magick.stdout.on("error", (err) => {
+          logger.error(`[HEIC magick->res pipeline error] ${err.message}`);
+
+          // ImageMagickパイプラインエラー時は元画像を送信
+          logger.info(`[HEIC ImageMagickパイプラインエラー→元画像送信] ${displayPath}`);
+
+          // HTTPヘッダー設定（まだ送信されていない場合）
+          if (!res.headersSent) {
+            res.setHeader("Content-Type", "image/heic");
+          }
+
+          // 元画像ファイルを直接ストリーミング
+          const fileStream = fs.createReadStream(fullPath);
+          fileStream.pipe(res);
+
+          fileStream.on("error", (streamErr) => {
+            logger.error(`[HEIC元画像送信失敗] ${displayPath}: ${streamErr.message}`);
+            if (!res.headersSent) res.writeHead(500);
+            res.end("Failed to read original HEIC image");
+            return reject(streamErr);
+          });
+
+          fileStream.on("end", () => {
+            logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+            res.end();
+            return resolve();
+          });
+        });
+
+        // 書き込み完了時に原子的にリネーム
+        writeStream.on("finish", () => {
+          try {
+            fs.renameSync(tmpPath, cachePath); // 原子的にリネーム
+          } catch (e) {
+            // リネーム失敗は無視（競合状態の可能性）
+            logger.warn(`[HEICキャッシュリネーム失敗] ${e.message}`);
+          }
+        });
+
+        // 書き込みストリームエラー処理
+        writeStream.on("error", (e) => {
+          logger.warn(`[HEICキャッシュ書き込みエラー] ${e.message}`);
+          // キャッシュ失敗時はレスポンス継続（エラーを無視）
+          // レスポンスは継続されるため、処理は正常に完了する
+        });
+
+        // レスポンス終了時の処理（Premature closeエラー対策）
+        res.on("close", () => {
+          if (!res.headersSent || res.writableEnded) {
+            // レスポンスが正常に終了した場合は何もしない
+            return;
+          }
+          // Premature closeの場合は強制的にresolveを呼ぶ
+          logger.warn(`[HEIC Premature close検出] ${displayPath} - 強制完了`);
+
+          // ImageMagickプロセスを強制終了
+          if (magick && !magick.killed) {
+            try {
+              magick.kill('SIGTERM');
+              logger.info(`[HEIC ImageMagick強制終了] ${displayPath}`);
+            } catch (e) {
+              // プロセス終了エラーは無視
+            }
+          }
+
+          return resolve();
+        });
+      } catch (writeError) {
+        logger.warn(`[HEICキャッシュディレクトリ作成失敗] ${writeError.message}`);
+        // キャッシュなしでレスポンス継続
+        pipeline(magick.stdout, res).catch((err) => {
+          // Premature closeエラーは頻発するため、ログレベルを調整
+          if (err.message && err.message.includes('Premature close')) {
+            logger.info(`[HEIC magick->res pipeline] ${err.message}`);
+            // Premature closeの場合はImageMagickプロセスを終了
+            if (magick && !magick.killed) {
+              try {
+                magick.kill('SIGTERM');
+                logger.info(`[HEIC ImageMagick強制終了(Premature close)] ${displayPath}`);
+              } catch (killErr) {
+                // プロセス終了エラーは無視
+              }
+            }
+          } else {
+            logger.error(`[HEIC magick->res pipeline error] ${err.message}`);
+
+            // ImageMagickパイプラインエラー時は元画像を送信
+            logger.info(`[HEIC ImageMagickパイプラインエラー→元画像送信] ${displayPath}`);
+
+            // HTTPヘッダー設定（まだ送信されていない場合）
+            if (!res.headersSent) {
+              res.setHeader("Content-Type", "image/heic");
+            }
+
+            // 元画像ファイルを直接ストリーミング
+            const fileStream = fs.createReadStream(fullPath);
+            fileStream.pipe(res);
+
+            fileStream.on("error", (streamErr) => {
+              logger.error(`[HEIC元画像送信失敗] ${displayPath}: ${streamErr.message}`);
+              if (!res.headersSent) res.writeHead(500);
+              res.end("Failed to read original HEIC image");
+              return reject(streamErr);
+            });
+
+            fileStream.on("end", () => {
+              logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+              res.end();
+              return resolve();
+            });
+          }
+        });
+      }
+    } else {
+      // キャッシュなしの場合は直接レスポンスにストリーミング
+      pipeline(magick.stdout, res).catch((e) => {
+        // Premature closeエラーは頻発するため、ログレベルを調整
+        if (e.message && e.message.includes('Premature close')) {
+          logger.info(`[HEIC magick->res pipeline] ${e.message}`);
+          // Premature closeの場合はImageMagickプロセスを終了
+          if (magick && !magick.killed) {
+            try {
+              magick.kill('SIGTERM');
+              logger.info(`[HEIC ImageMagick強制終了(Premature close)] ${displayPath}`);
+            } catch (killErr) {
+              // プロセス終了エラーは無視
+            }
+          }
+        } else {
+          logger.error(`[HEIC magick->res pipeline error] ${e.message}`);
+
+          // ImageMagickパイプラインエラー時は元画像を送信
+          logger.info(`[HEIC ImageMagickパイプラインエラー→元画像送信] ${displayPath}`);
+
+          // HTTPヘッダー設定（まだ送信されていない場合）
+          if (!res.headersSent) {
+            res.setHeader("Content-Type", "image/heic");
+          }
+
+          // 元画像ファイルを直接ストリーミング
+          const fileStream = fs.createReadStream(fullPath);
+          fileStream.pipe(res);
+
+          fileStream.on("error", (streamErr) => {
+            logger.error(`[HEIC元画像送信失敗] ${displayPath}: ${streamErr.message}`);
+            if (!res.headersSent) res.writeHead(500);
+            res.end("Failed to read original HEIC image");
+            return reject(streamErr);
+          });
+
+          fileStream.on("end", () => {
+            logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+            res.end();
+            return resolve();
+          });
+        }
+      }); // レスポンスはパイプラインで自動終了
+    }
+
+    // 変換完了時の処理
+    let heicResponseSize = 0; // HEIC ImageMagickレスポンスサイズ
+    let chunkCount = 0; // チャンク数をカウント
+    magick.stdout.on("data", (chunk) => {
+      heicResponseSize += chunk.length; // レスポンスサイズを累計
+      chunkCount++;
+    });
+    magick.stdout.on("end", () => {
+      // 変換完了の詳細ログ
+      const compressionRatio = heicResponseSize > 0 ? Math.round((1 - heicResponseSize / (Photo_Size ? Photo_Size * Photo_Size * 3 : 1000000)) * 100) : 0;
+      logger.info(`[HEIC変換完了(ImageMagick)] ${displayPath} (サイズ: ${heicResponseSize.toLocaleString()} bytes, チャンク数: ${chunkCount}, 圧縮率: ${compressionRatio}%, 設定: q=${quality}, effort=${effortVal}, preset=${presetVal})`);
+      res.end(); // レスポンスを終了
+      return resolve(); // 呼び出し元に完了を伝播
+    });
+
+    // Premature closeエラー対策
+    res.on("close", () => {
+      if (!res.headersSent || res.writableEnded) {
+        // レスポンスが正常に終了した場合は何もしない
+        return;
+      }
+      // Premature closeの場合は強制的にresolveを呼ぶ
+      logger.warn(`[HEIC Premature close検出] ${displayPath} - 強制完了`);
+
+      // ImageMagickプロセスを強制終了
+      if (magick && !magick.killed) {
+        try {
+          magick.kill('SIGTERM');
+          logger.info(`[HEIC ImageMagick強制終了] ${displayPath}`);
+        } catch (e) {
+          // プロセス終了エラーは無視
+        }
+      }
+
+      return resolve();
+    });
+  });
+}
+
+/**
  * in-flight状況の監視とクリーンアップ
  * 長時間残っている変換処理を検出・クリーンアップ
  */
@@ -916,5 +1315,6 @@ startInFlightMonitoring();
 
 module.exports = {
   convertAndRespond,
-  convertAndRespondWithLimit
+  convertAndRespondWithLimit,
+  convertHeicWithImageMagick
 };

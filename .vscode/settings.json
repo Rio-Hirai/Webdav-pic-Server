@@ -1,6 +1,7 @@
 {
     "cSpell.words": [
         "Authentification",
+        "buildtools",
         "choco",
         "cpus",
         "EACCES",
@@ -8,7 +9,9 @@
         "EXIF",
         "findstr",
         "iltorb",
+        "Imagemagik",
         "Kaku",
+        "libde",
         "libvips",
         "magick",
         "Magik",

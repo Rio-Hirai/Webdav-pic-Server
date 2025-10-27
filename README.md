@@ -7,10 +7,13 @@
 
 **最新の主要機能**:
 
+- 🖼️ **HEIC/HEIF形式対応**: ImageMagickへの直接ルーティングでHEIC画像をリアルタイム変換
+- ⚙️ **WebP詳細設定**: preset、reduction effort、effort設定による高精度圧縮制御
+- 🎨 **設定画面大幅改善**: テンプレート機能、ダークモード対応、直感的なUI
+- ⚡ **Node.js 25.0.0対応**: JSON.stringifyやWebAssemblyのパフォーマンス改善を活用
 - 🚀 **スタック処理システム**: LIFO方式で最新リクエストを最優先処理
 - 🛡️ **設定値検証機能**: config.txtの入力規則チェックと自動修正
 - 💾 **動的メモリ管理**: 大量画像処理時のメモリ最適化
-- ⚡ **高スペック環境対応**: Ryzen 3950X・64GB RAM最適化設定
 - 🏗️ **モジュール分割**: 機能別に分割された保守しやすいアーキテクチャ
 - 📝 **動的設定管理**: サーバー再起動なしで全設定を変更可能
 
@@ -18,20 +21,23 @@
 
 ### 🖼️ 画像自動変換
 
-- **対応入力形式**: JPG, JPEG, PNG, TIFF, TIF, BMP, AVIF
+- **対応入力形式**: JPG, JPEG, PNG, TIFF, TIF, BMP, AVIF, **HEIC, HEIF**
 - **出力形式**: WebP
-- **変換エンジン**: Sharp（高速） + ImageMagick（フォールバック）
+- **変換エンジン**: Sharp（高速） + ImageMagick（フォールバック・HEIC専用）
 - **自動リサイズ**: 設定に応じて最適なサイズに調整
-- **品質調整**: クエリパラメータ `?q=70` で指定可能（30-90 の範囲）
+- **品質調整**: クエリパラメータ `?q=70` で指定可能（10-100 の範囲）
+- **WebP詳細設定**: preset、reduction effort、effort設定による高精度圧縮制御
 
 **実装箇所**:
 
-- **画像拡張子判定**: `.core/webdav.js` - `IMAGE_EXTS`配列で対応形式を定義
+- **画像拡張子判定**: `.core/webdav.js` - `IMAGE_EXTS`配列で対応形式を定義（HEIC/HEIF含む）
 - **変換処理メイン**: `.core/image.js` - `convertAndRespond`関数で Sharp/ImageMagick による変換処理
+- **HEIC専用変換**: `.core/image.js` - `convertHeicWithImageMagick`関数でHEIC画像の直接ルーティング
 - **並列処理制限**: `.core/image.js` - `convertAndRespondWithLimit`関数で並列数制御とin-flight管理
 - **Sharp 設定**: `main.js` 94-111 行 - パフォーマンス最適化設定（並列度制御、メモリキャッシュ、ファイルキャッシュ）
-- **品質パラメータ処理**: `.core/webdav.js` - クエリパラメータ`q`の取得と検証（30-90 の範囲制限）
+- **品質パラメータ処理**: `.core/webdav.js` - クエリパラメータ`q`の取得と検証（10-100 の範囲制限）
 - **画像処理モード**: `.core/image.js` - 3つの処理モード（高速処理、バランス処理、高圧縮処理）
+- **WebP詳細設定**: `.core/image.js` - preset、reduction effort、effort設定による高精度圧縮制御
 
 ### ⚡ 高性能キャッシュシステム
 
@@ -85,20 +91,35 @@
 - **動的設定読み込み**: `.core/config.js` - `loadConfig`関数による設定ファイル監視と動的更新（差分検出、型変換、ログ出力）
 - **設定値検証**: `.core/config.js` - `validateConfigValue`関数による入力規則チェック（数値範囲、真偽値、時刻形式、パス形式の検証）
 
+### 🎨 設定画面システム
+
+- **Web UI**: `localhost:1900/setting`でアクセス可能な設定画面
+- **テンプレート機能**: 画質テンプレート（元画質、最低画質、低画質、中画質、高画質）
+- **ダークモード対応**: 自動切り替えと手動切り替え
+- **リアルタイム保存**: 設定変更の即座反映
+- **直感的UI**: スライダー、セレクトボックス、トグルスイッチ
+
+**実装箇所**:
+
+- **設定画面UI**: `public/settings.html` - 完全なWeb UI設定画面
+- **設定API**: `.core/webdav.js` - `/setting/data`（読み込み）、`/setting/save`（保存）エンドポイント
+- **CSS**: `public/css/settings.css` - ダークモード対応のスタイルシート
+
 ### 🚀 単一サーバー動的設定
 
 - **動的設定**: config.txtの変更で即座に反映（サーバー再起動不要）
 - **画像処理モード**: 3つの処理モードを動的に切り替え可能
 - **パラメータ調整**: 品質、サイズ、キャッシュ設定等をリアルタイムで調整
+- **WebP詳細設定**: preset、reduction effort、effort設定の動的変更
 
 **実装箇所**: `main.js` 175 行 - `startWebDAV(activeCacheDir)`で単一サーバーを起動
 
 ## システム要件
 
-- **Node.js**: 16 以上
-- **ImageMagick**: フォールバック用（オプション）
+- **Node.js**: 25.0.0 以上（推奨）
+- **ImageMagick**: HEIC/HEIF変換用（必須）
 - **ディスク容量**: キャッシュ用の十分な容量
-- **メモリ**: 画像処理用の十分なメモリ
+- **メモリ**: 画像処理用の十分なメモリ（推奨: 8GB以上）
 
 ## インストール
 
@@ -108,7 +129,7 @@
 npm install
 ```
 
-### 2. ImageMagick のインストール（推奨）
+### 2. ImageMagick のインストール（必須）
 
 #### Windows
 
@@ -153,6 +174,7 @@ node test.js
 起動後、以下の URL でアクセス可能：
 
 - **WebDAVサーバー**: <http://localhost:1900/> (config.txtのPORT設定で変更可能)
+- **設定画面**: <http://localhost:1900/setting> (Web UI設定画面)
 
 ### モバイル・タブレットでのアクセス
 
@@ -181,7 +203,10 @@ node test.js
 # 通常の画像アクセス（自動変換）
 http://localhost:1900/path/to/image.jpg
 
-# 品質指定（30-90の範囲）
+# HEIC画像の自動変換
+http://localhost:1900/path/to/image.heic
+
+# 品質指定（10-100の範囲）
 http://localhost:1900/path/to/image.jpg?q=80
 
 # 自動リサイズ（設定に応じて）
@@ -189,6 +214,18 @@ http://localhost:1900/path/to/large_image.jpg
 ```
 
 ## 設定
+
+### 設定画面での設定変更
+
+**Web UI設定画面**: <http://localhost:1900/setting>
+
+設定画面では以下の操作が可能です：
+
+- **テンプレート選択**: 画質テンプレート（元画質、最低画質、低画質、中画質、高画質）
+- **スライダー調整**: 画像サイズ、品質、WebP設定の直感的な調整
+- **モード選択**: 画像処理モード（高速、バランス、高圧縮）
+- **詳細設定**: WebP preset、reduction effort、effort設定
+- **リアルタイム保存**: 設定変更の即座反映
 
 ### サーバー設定の変更
 
@@ -235,10 +272,10 @@ MAX_LIST=1280
 | `RATE_LIMIT_WINDOW_MS` | レート制限時間窓（ミリ秒） | `60000` | 1秒-5分 | `30000`, `120000` |
 | `RATE_LIMIT_QUEUE_SIZE` | レート制限キューサイズ | `100` | 10-1000 | `200`, `500` |
 | `STACK_MAX_SIZE` | スタック最大サイズ | `100` | 50-500 | `200`, `300` |
-| `STACK_PROCESSING_DELAY_MS` | スタック処理遅延（ミリ秒） | `5` | 1-100ms | `10`, `20` |
-| `MAGICK_PATH` | ImageMagickコマンドパス | `magick` | 有効なパス | `/usr/bin/magick` |
-| `RESTART_ENABLED` | 自動再起動機能の有効/無効 | `false` | `true`/`false` | `true`, `false` |
-| `RESTART_TIME` | 再起動時刻（24時間形式） | `12:10` | HH:MM形式 | `03:00`, `14:30` |
+| `WEBP_EFFORT` | WebP圧縮努力レベル | `1` | 0-6 | `0`(最速), `3`(標準), `6`(最高圧縮) |
+| `WEBP_EFFORT_FAST` | WebP圧縮努力レベル（高速モード用） | `0` | 0-2 | `0`(最速), `1`(標準), `2`(高圧縮) |
+| `WEBP_PRESET` | WebPプリセット | `default` | 有効なプリセット | `default`, `photo`, `picture`, `drawing`, `icon`, `text` |
+| `WEBP_REDUCTION_EFFORT` | WebP reduction effort | `0` | 0-6 | `0`(最速), `3`(標準), `6`(最高圧縮) |
 
 #### 設定ファイル例
 
@@ -255,6 +292,12 @@ PHOTO_SIZE=640
 DEFAULT_QUALITY=30
 # 画像処理モード: 1=高速処理(effort=0,smartSubsample=false,回転補正なし), 2=バランス(effort=1,smartSubsample=true,回転補正あり), 3=高圧縮(effort=1,smartSubsample=true,回転補正あり,最適リサイズ)
 IMAGE_MODE=2
+
+# WebP詳細設定
+WEBP_EFFORT=1
+WEBP_EFFORT_FAST=0
+WEBP_PRESET=default
+WEBP_REDUCTION_EFFORT=0
 
 # キャッシュ設定（ミリ秒）- Ryzen 3950X・64GB最適化
 CACHE_TTL_MS=600000
@@ -672,7 +715,7 @@ du -sh Y:/caches/webdav/tmp
 
 | パラメータ | 説明     | 範囲  | デフォルト         |
 | ---------- | -------- | ----- | ------------------ |
-| `q`        | 画像品質 | 30-90 | サーバー設定による |
+| `q`        | 画像品質 | 10-100 | サーバー設定による |
 
 ### レスポンスヘッダー
 
@@ -692,23 +735,25 @@ ISC
 
 ## 更新履歴
 
+- **v24.1.0**: HEIC形式に対応
+  - 🔄 **HEIC/HEIF形式対応**: ImageMagickへの直接ルーティングでHEIC/HEIF形式もリアルタイム変換に対応
 - **v24.0.0**: Node.js 25.0.0対応
   - ⚡ **最新Node.js対応**: JSON.stringifyやWebAssemblyのパフォーマンス改善により高速化
-  - ⚙️ **設定画面**: 不完全な自動再起動機能に関するUIを削除（自動再起動機能の実装が成功次第復活予定）
+  - 🎨 **設定画面改善**: 不完全な自動再起動機能に関するUIを削除（自動再起動機能の実装が成功次第復活予定）
 - **v23.3.0**: presetとreductionEffortパラメータを導入
   - 🔧 **presetとreductionEffortパラメータ**: presetとreductionEffortを設定可能
-  - ⚙️ **設定画面**: presetとreductionEffortパラメータ設定用の項目を追加
+  - 🎨 **設定画面改善**: presetとreductionEffortパラメータ設定用の項目を追加
 - **v23.2.1**: 設定画面のUI修正
-  - ⚙️ **設定画面**: effort用のUIを修正
+  - 🎨 **設定画面改善**: effort用のUIを修正
 - **v23.2.0**: 本格的なeffort設定の導入
   - 🔧 **本格的なeffort設定**: effort値を0から6までで設定可能。圧縮率が**最大50％**UP
-  - ⚙️ **設定画面**: effort値設定用の項目を追加
+  - 🎨 **設定画面改善**: effort値設定用の項目を追加
 - **v23.1.2**: 設定画面のUI修正
-  - ⚙️ **設定画面**: 画像変換設定のテンプレートを追加、ラベルを修正
+  - 🎨 **設定画面改善**: 画像変換設定のテンプレートを追加、ラベルを修正
 - **v23.1.1**: 設定画面のUI修正
-  - ⚙️ **設定画面**: 一部UIを大幅改修
+  - 🎨 **設定画面改善**: 直感的なUI
 - **v23.1.0**: 設定画面のUI修正
-  - ⚙️ **設定画面**: 画質テンプレートを用意、ダークモードを導入
+  - 🎨 **設定画面改善**: テンプレート機能、ダークモード対応、直感的なUI
 - **v23.0.0**: 設定画面の導入
   - ⚙️ **設定画面**: `localhost:1900/setting`でアクセスできる設定画面を導入
 - **v22.1.2**: 並列処理性能最適化
@@ -774,13 +819,13 @@ ISC
 
 #### パフォーマンス向上
 
-- **画像形式の拡張**: AVIF、HEIC 出力対応
+- **画像形式の拡張**: AVIF、HEIC 出力対応（✅ 実装済み：HEIC/HEIF入力対応）
 - **CDN 連携**: 外部 CDN へのキャッシュ配信
 - **並列処理の最適化**: より効率的な並列変換処理（✅ 一部実装済み：高スペック環境最適化）
 
 #### 機能拡張
 
-- **Web インターフェース**: ブラウザでのファイル管理 UI
+- **Web インターフェース**: ブラウザでのファイル管理 UI（✅ 実装済み：設定画面）
 - **API エンドポイント**: RESTful API の提供
 - **メタデータ管理**: EXIF 情報の保持・表示
 - **バッチ処理**: 複数ファイルの一括変換

@@ -108,7 +108,7 @@ function configureSharp() {
       files: 150, // ファイルキャッシュ数を増加（メモリ効率向上）
       items: 300, // アイテムキャッシュ数を増加（メモリ効率向上）
     });
-    logger.info(`[Node.js 25最適化] sharp configured: concurrency=${optimizedConcurrency}, memory=${optimizedMemory}MB, files=150, items=300`);
+    logger.info(`sharp configured: concurrency=${optimizedConcurrency}, memory=${optimizedMemory}MB, files=150, items=300`);
   } catch (e) {
     logger.warn("failed to configure sharp performance settings", e);
   }

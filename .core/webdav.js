@@ -64,6 +64,8 @@ function startWebDAV(activeCacheDir) {
     ".tif", // TIFF画像
     ".bmp", // BMP画像
     ".avif", // AVIF画像
+    ".heic", // HEIC画像
+    ".heif", // HEIF画像
   ];
 
   // キャッシュTTL設定
@@ -908,6 +910,8 @@ function startWebDAV(activeCacheDir) {
             ".tiff", // TIFF画像
             ".tif", // TIFF画像
             ".avif", // AVIF画像
+            ".heic", // HEIC画像
+            ".heif", // HEIF画像
             ".svg", // SVG画像
           ];
           const isTextFile = textExts.includes(ext.toLowerCase()); // テキストファイルかどうか

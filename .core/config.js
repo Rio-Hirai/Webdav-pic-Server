@@ -73,7 +73,7 @@ function validateConfigValue(key, value, defaultValue) {
     // 具体的な範囲チェック
     switch (key) {
       case 'DEFAULT_QUALITY':
-        if (numValue < 1 || numValue > 100) {
+        if (numValue < 10 || numValue > 100) {
           logger.warn(`[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (品質は10-100の範囲)`);
           return defaultValue;
         }

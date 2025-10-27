@@ -6,3 +6,4 @@ server.log
 webdav-server.pid
 comp.py
 logs/
+pic/

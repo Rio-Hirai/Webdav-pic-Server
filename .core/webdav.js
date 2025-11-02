@@ -671,8 +671,8 @@ function startWebDAV(activeCacheDir) {
                * キャッシュキーの生成
                * ファイルパス、リサイズサイズ、品質、変更時間、ファイルサイズを含めて
                * ファイルの変更を検知し、適切なキャッシュ管理を実現
+               * SHA-256ハッシュを使用して固定長のキーを生成（Windowsパス長制限対策）
                */
-              // Node.js 25.0.0最適化: 組み込みbase64/hex変換を活用
               const keyData = fullPath +
                 "|" +
                 (getPhotoSize() ?? "o") + // 写真サイズを取得
@@ -683,8 +683,8 @@ function startWebDAV(activeCacheDir) {
                 "|" +
                 String(st.size); // ファイルサイズを取得
               
-              // Node.js 25.0.0の最適化されたBuffer操作を使用
-              const key = Buffer.from(keyData, 'utf8').toString('hex');
+              // SHA-256ハッシュを使用して64文字の固定長キーを生成
+              const key = crypto.createHash('sha256').update(keyData, 'utf8').digest('hex');
               const cachePath = activeCacheDir // キャッシュディレクトリが存在する場合はキャッシュパスを設定
                 ? path.join(activeCacheDir, key + ".webp") // キャッシュパスを設定
                 : null; // キャッシュディレクトリが存在しない場合はnullを設定

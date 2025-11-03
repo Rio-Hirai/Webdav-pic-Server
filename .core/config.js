@@ -362,7 +362,10 @@ function loadConfig() {
 loadConfig();
 
 // 設定ファイル監視開始
-setInterval(loadConfig, CONFIG_WATCH_INTERVAL);
+// 注: Sharp設定の再適用はmain.jsの監視ループで実行
+setInterval(() => {
+  loadConfig(); // 戻り値は使用しない（main.jsで処理）
+}, CONFIG_WATCH_INTERVAL);
 logger.info(`[設定監視開始] ${CONFIG_FILE} を ${CONFIG_WATCH_INTERVAL/1000}秒間隔で監視中`);
 
 // 圧縮機能の有効/無効制御（動的設定対応）

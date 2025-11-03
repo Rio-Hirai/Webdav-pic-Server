@@ -27,11 +27,20 @@ const pipeline = promisify(stream.pipeline);
  * 並列処理制限とin-flight管理
  * 大量の画像変換リクエストに対する適切な並列制御を提供
  */
-const maxConcurrency = getMaxConcurrency(); // 動的設定から並列数を取得
-const conversionLimit = pLimit(maxConcurrency); // p-limitによる並列制限
 const inFlightConversions = new Map(); // in-flight変換の管理（重複変換防止）
 
-logger.info(`[画像変換並列制御] 最大並列数: ${maxConcurrency}, in-flight管理: 有効`);
+// 初期並列数でpLimitを初期化
+let conversionLimit = pLimit(getMaxConcurrency());
+
+// 並列数を再初期化する関数（設定変更時に呼び出し）
+function reinitializeConcurrency() {
+  const newConcurrency = getMaxConcurrency();
+  conversionLimit = pLimit(newConcurrency);
+  logger.info(`[並列制御再初期化] 最大並列数: ${newConcurrency}`);
+}
+
+// 初回ログ出力
+logger.info(`[画像変換並列制御] 最大並列数: ${getMaxConcurrency()}, in-flight管理: 有効`);
 
 /**
  * 並列制限付き画像変換・レスポンス送信関数
@@ -1305,7 +1314,7 @@ function startInFlightMonitoring() {
     
     // 定期的にin-flight状況をログ出力
     if (inFlightConversions.size > 0) {
-      logger.info(`[in-flight状況] 進行中の変換: ${inFlightConversions.size}/${maxConcurrency}`);
+      logger.info(`[in-flight状況] 進行中の変換: ${inFlightConversions.size}/${getMaxConcurrency()}`);
     }
   }, 10000); // 10秒間隔でチェック
 }
@@ -1316,5 +1325,6 @@ startInFlightMonitoring();
 module.exports = {
   convertAndRespond,
   convertAndRespondWithLimit,
-  convertHeicWithImageMagick
+  convertHeicWithImageMagick,
+  reinitializeConcurrency
 };

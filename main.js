@@ -10,7 +10,7 @@ const { promisify } = require("util"); // コールバック→Promise変換 - �
 const { execFile, spawn } = require("child_process"); // 外部プロセス実行 - ImageMagick等の外部コマンド呼び出し、フォールバック処理
 const zlib = require("zlib"); // レスポンス圧縮処理 - gzip/deflate圧縮
 
-// 外部ライブラリ
+// 外部ライブラリ（Node.jsの標準ライブラリを使用していないもの）
 const sharp = require("sharp"); // 高性能画像変換ライブラリ - libvipsベース、WebP/JPEG/PNG変換、メタデータ取得、回転補正
 const webdav = require("webdav-server").v2; // WebDAVサーバー実装 - RFC4918準拠のWebDAVプロトコル、PROPFIND/PROPPATCH等
 const pLimit = require("p-limit"); // 並列処理制御 - 同時実行数の制限によるリソース保護、メモリ枯渇防止
@@ -84,7 +84,7 @@ const { initializeStackSystem } = stack;
 
 // 画像変換モジュール
 const image = require("./.core/image");
-const { convertAndRespond } = image;
+const { convertAndRespond, reinitializeConcurrency } = image;
 
 // WebDAVサーバーモジュール
 const webdavServer = require("./.core/webdav");
@@ -93,22 +93,17 @@ const { startWebDAV } = webdavServer;
 // Sharpの初期設定関数（動的設定関数の定義後に配置）
 function configureSharp() {
   try {
-    const cpuCount = Math.max(1, os.cpus().length - 1); // 最低1、最大はCPU数-1
     const maxConcurrency = getMaxConcurrency(); // 動的設定から取得
     const memoryLimit = getSharpMemoryLimit(); // 動的設定から取得
 
-    // Node.js 25.0.0最適化: V8エンジン14.1のメモリ効率向上を活用
-    const optimizedConcurrency = Math.min(maxConcurrency, cpuCount * 1.25); // CPU数に基づく最適化
-    const optimizedMemory = Math.floor(memoryLimit * 1.2); // メモリ効率向上を考慮
-
-    // 動的設定を反映
-    sharp.concurrency(optimizedConcurrency);
+    // 動的設定を直接反映（CPU数制限は適用しない）
+    sharp.concurrency(maxConcurrency);
     sharp.cache({
-      memory: optimizedMemory, // Node.js 25.0.0最適化されたメモリキャッシュサイズ（MB）
+      memory: memoryLimit, // メモリキャッシュサイズ（MB）
       files: 150, // ファイルキャッシュ数を増加（メモリ効率向上）
       items: 300, // アイテムキャッシュ数を増加（メモリ効率向上）
     });
-    logger.info(`sharp configured: concurrency=${optimizedConcurrency}, memory=${optimizedMemory}MB, files=150, items=300`);
+    logger.info(`[Sharp設定] concurrency=${maxConcurrency}, memory=${memoryLimit}MB, files=150, items=300`);
   } catch (e) {
     logger.warn("failed to configure sharp performance settings", e);
   }
@@ -171,6 +166,20 @@ if (RESTART_ENABLED) {
 } else {
   logger.info("[再起動機能] 無効 (RESTART_ENABLED=false または未設定)");
 }
+
+/**
+ * 設定変更監視
+ * config.txtの変更を検出してSharp設定を再適用
+ * config.js内のsetIntervalと統合するため、別途監視を開始
+ */
+setInterval(() => {
+  const result = loadConfig();
+  if (result.sharpConfigChanged) {
+    logger.info("[設定変更検出] Sharp設定を再適用します");
+    configureSharp();
+    reinitializeConcurrency();
+  }
+}, 10000); // config.jsと同じ10秒間隔でチェック
 
 /**
  * メインループ: 単一サーバーの起動

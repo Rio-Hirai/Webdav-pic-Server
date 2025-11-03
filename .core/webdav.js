@@ -634,100 +634,96 @@ function startWebDAV(activeCacheDir) {
         logger.info(`${req.connection.remoteAddress} ${req.method} ${displayPath}`); // リクエストログ
 
         /**
-         * 画像ファイルのGETリクエスト処理（スタック処理）
-         * 画像拡張子を持つファイルへのアクセス時に変換処理をスタックに追加
+         * 画像ファイルのGETリクエスト処理（並列処理）
+         * 画像拡張子を持つファイルへのアクセス時に変換処理を直接実行
          */
         if (req.method === "GET" && IMAGE_EXTS.includes(ext)) {
           logger.info(`[変換要求] ${fullPath}`); // 変換要求ログ
 
-          // 画像変換処理をスタックに追加
-          requestStack.push({
-            displayPath,
-            res,
-            processor: async () => {
-              const st = await statPWrap(fullPath).catch(() => null);
+          // 並列制限付きで直接変換処理を実行（スタック処理は使用しない）
+          (async () => {
+            const st = await statPWrap(fullPath).catch(() => null);
 
-              // ファイルが存在しない場合（ディレクトリやファイルでない場合）
-              if (!st || !st.isFile()) {
-                logger.warn(`[404 Not Found] ${fullPath}`); // 404 Not Foundログ
-                res.writeHead(404); // ステータスコードを404に設定
-                return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
-              }
+            // ファイルが存在しない場合（ディレクトリやファイルでない場合）
+            if (!st || !st.isFile()) {
+              logger.warn(`[404 Not Found] ${fullPath}`); // 404 Not Foundログ
+              res.writeHead(404); // ステータスコードを404に設定
+              return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
+            }
 
-              // 画像サイズが1MB以上の場合のみキャッシュ
-              const shouldCache = st.size >= getCacheMinSize(); // キャッシュが必要かどうか
+            // 画像サイズが1MB以上の場合のみキャッシュ
+            const shouldCache = st.size >= getCacheMinSize(); // キャッシュが必要かどうか
 
-              /**
-               * 品質パラメータの取得と検証
-               * クエリパラメータから品質を取得し、30-90の範囲に制限
-               * 設定ファイルから動的にデフォルト品質を取得
-               */
-              const qParam = req.url.match(/[?&]q=(\d+)/)?.[1]; // 品質パラメータを取得
-              const quality = qParam // 品質パラメータが存在する場合は品質パラメータを取得
-                ? Math.min(Math.max(parseInt(qParam, 10), 30), 90) // 品質パラメータを30-90の範囲に制限
-                : getDefaultQuality(); // デフォルト品質を取得して品質パラメータを設定
+            /**
+             * 品質パラメータの取得と検証
+             * クエリパラメータから品質を取得し、30-90の範囲に制限
+             * 設定ファイルから動的にデフォルト品質を取得
+             */
+            const qParam = req.url.match(/[?&]q=(\d+)/)?.[1]; // 品質パラメータを取得
+            const quality = qParam // 品質パラメータが存在する場合は品質パラメータを取得
+              ? Math.min(Math.max(parseInt(qParam, 10), 30), 90) // 品質パラメータを30-90の範囲に制限
+              : getDefaultQuality(); // デフォルト品質を取得して品質パラメータを設定
 
-              /**
-               * キャッシュキーの生成
-               * ファイルパス、リサイズサイズ、品質、変更時間、ファイルサイズを含めて
-               * ファイルの変更を検知し、適切なキャッシュ管理を実現
-               * SHA-256ハッシュを使用して固定長のキーを生成（Windowsパス長制限対策）
-               */
-              const keyData = fullPath +
-                "|" +
-                (getPhotoSize() ?? "o") + // 写真サイズを取得
-                "|" +
-                quality + // 品質を取得
-                "|" +
-                String(st.mtimeMs) + // ファイルの変更時間を取得
-                "|" +
-                String(st.size); // ファイルサイズを取得
-              
-              // SHA-256ハッシュを使用して64文字の固定長キーを生成
-              const key = crypto.createHash('sha256').update(keyData, 'utf8').digest('hex');
-              const cachePath = activeCacheDir // キャッシュディレクトリが存在する場合はキャッシュパスを設定
-                ? path.join(activeCacheDir, key + ".webp") // キャッシュパスを設定
-                : null; // キャッシュディレクトリが存在しない場合はnullを設定
+            /**
+             * キャッシュキーの生成
+             * ファイルパス、リサイズサイズ、品質、変更時間、ファイルサイズを含めて
+             * ファイルの変更を検知し、適切なキャッシュ管理を実現
+             * SHA-256ハッシュを使用して固定長のキーを生成（Windowsパス長制限対策）
+             */
+            const keyData = fullPath +
+              "|" +
+              (getPhotoSize() ?? "o") + // 写真サイズを取得
+              "|" +
+              quality + // 品質を取得
+              "|" +
+              String(st.mtimeMs) + // ファイルの変更時間を取得
+              "|" +
+              String(st.size); // ファイルサイズを取得
+            
+            // SHA-256ハッシュを使用して64文字の固定長キーを生成
+            const key = crypto.createHash('sha256').update(keyData, 'utf8').digest('hex');
+            const cachePath = activeCacheDir // キャッシュディレクトリが存在する場合はキャッシュパスを設定
+              ? path.join(activeCacheDir, key + ".webp") // キャッシュパスを設定
+              : null; // キャッシュディレクトリが存在しない場合はnullを設定
 
-              /**
-               * キャッシュファイルの存在確認とレスポンス
-               * 非同期でチェックしてブロッキングを避ける
-               */
-              if (shouldCache) {
-                try {
-                  const cst = await statPWrap(cachePath).catch(() => null);
-                  if (cst && cst.isFile && cst.isFile()) {
-                    // キャッシュファイルが存在する場合、直接レスポンス
-                    const headers = {
-                      "Content-Type": "image/webp", // コンテントタイプを設定
-                      "Content-Length": cst.size, // コンテント長を設定
-                      "Last-Modified": new Date(cst.mtimeMs).toUTCString(), // 最終更新時間を設定
-                      ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"', // ETagを設定
-                      Connection: "Keep-Alive", // 接続を保持
-                      "Keep-Alive": "timeout=600", // 接続タイムアウトを600秒に設定
-                    }; // ヘッダーを設定
-                    res.writeHead(200, headers); // ステータスコードを200に設定してヘッダーを送信
-                    return fs.createReadStream(cachePath).pipe(res); // キャッシュファイルを読み込んでレスポンス
-                  }
-                } catch (e) {
-                  logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
+            /**
+             * キャッシュファイルの存在確認とレスポンス
+             * 非同期でチェックしてブロッキングを避ける
+             */
+            if (shouldCache) {
+              try {
+                const cst = await statPWrap(cachePath).catch(() => null);
+                if (cst && cst.isFile && cst.isFile()) {
+                  // キャッシュファイルが存在する場合、直接レスポンス
+                  const headers = {
+                    "Content-Type": "image/webp", // コンテントタイプを設定
+                    "Content-Length": cst.size, // コンテント長を設定
+                    "Last-Modified": new Date(cst.mtimeMs).toUTCString(), // 最終更新時間を設定
+                    ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"', // ETagを設定
+                    Connection: "Keep-Alive", // 接続を保持
+                    "Keep-Alive": "timeout=600", // 接続タイムアウトを600秒に設定
+                  }; // ヘッダーを設定
+                  res.writeHead(200, headers); // ステータスコードを200に設定してヘッダーを送信
+                  return fs.createReadStream(cachePath).pipe(res); // キャッシュファイルを読み込んでレスポンス
                 }
+              } catch (e) {
+                logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
               }
+            }
 
-              // 画像変換を実行（並列制限付き）
-              await convertAndRespondWithLimit({
-                fullPath, // ファイルパス
-                displayPath, // 表示パス
-                cachePath: shouldCache ? cachePath : null, // キャッシュパス
-                quality, // 品質
-                Photo_Size: getPhotoSize(), // 写真サイズ
-                res, // レスポンス
-                clientIP, // クライアントIP
-              }); // 画像変換を実行
-            },
-          });
+            // 画像変換を実行（並列制限付き）
+            await convertAndRespondWithLimit({
+              fullPath, // ファイルパス
+              displayPath, // 表示パス
+              cachePath: shouldCache ? cachePath : null, // キャッシュパス
+              quality, // 品質
+              Photo_Size: getPhotoSize(), // 写真サイズ
+              res, // レスポンス
+              clientIP, // クライアントIP
+            }); // 画像変換を実行
+          })(); // 即座に非同期関数を実行
 
-          return; // スタック処理なので即座にレスポンスを返さない（スタックで処理される）
+          return; // 非同期処理なので即座にレスポンスを返さない
         }
 
         /**

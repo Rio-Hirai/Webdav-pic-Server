@@ -281,6 +281,11 @@ code{ background: rgba(255,255,255,0.03); padding:2px 6px; border-radius:4px; fo
 	form .row .field-control { justify-self: stretch; }
 	form .row input, form .row select, form .row textarea { justify-self: start; }
 	.row.checkbox-row input[type="checkbox"] { margin-left:0; justify-self:start; }
+
+	/* 子行はインデント分だけコントロール幅が減るため、最小幅を少し緩和してはみ出しを抑制 */
+	.row.child label { min-width: 200px; }
+	.row.child .field-control input[type="range"]{ min-width: 60px; }
+	.row.child .field-control output{ min-width: 48px; }
 }
 
 /* settings.html のインライン属性から移動 */

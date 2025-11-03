@@ -57,20 +57,26 @@ async function convertAndRespondWithLimit(params) {
     logger.info(`[重複変換防止] 同じ画像の変換が進行中: ${displayPath}`);
     
     // 既存の変換完了を待つ
-    return new Promise((resolve, reject) => {
-      const checkInterval = setInterval(() => {
+    return new Promise((resolve) => {
+      const checkInterval = setInterval(async () => {
         if (!inFlightConversions.has(cacheKey)) {
           clearInterval(checkInterval);
-          // 変換完了後、キャッシュファイルから読み込んで送信
-          if (cachePath && fs.existsSync(cachePath)) {
-            const stream = fs.createReadStream(cachePath);
-            res.setHeader('Content-Type', 'image/webp');
-            stream.pipe(res);
-            stream.on('end', resolve);
-            stream.on('error', reject);
-          } else {
-            reject(new Error('Cache file not found after conversion'));
+          try {
+            // キャッシュがある場合はキャッシュから返す
+            if (cachePath && fs.existsSync(cachePath)) {
+              const stream = fs.createReadStream(cachePath);
+              res.setHeader('Content-Type', 'image/webp');
+              stream.pipe(res);
+              stream.on('end', resolve);
+              stream.on('error', () => resolve());
+              return;
+            }
+            // キャッシュが無い場合は改めて変換を実行（短時間で完了する想定）
+            await conversionLimit(() => convertAndRespond(params));
+          } catch (e) {
+            try { res.writeHead(500); res.end('Internal error'); } catch (_) {}
           }
+          return resolve();
         }
       }, 100); // 100ms間隔でチェック
     });
@@ -152,6 +158,15 @@ async function convertAndRespond({ fullPath, displayPath, cachePath, quality, Ph
        * - エラーハンドリング: 変換失敗時の適切な処理
        */
       transformer = sharp(fullPath, { limitInputPixels: getSharpPixelLimit() }); // 動的設定によるピクセル制限（大量画像処理時のメモリ保護強化）
+
+      // クライアント切断時にパイプラインを破棄してリソースを解放
+      try {
+        if (res && typeof res.once === 'function') {
+          res.once('close', () => {
+            try { if (transformer && typeof transformer.destroy === 'function') transformer.destroy(); } catch (_) {}
+          });
+        }
+      } catch (_) {}
 
       // 回転補正は高速処理モードでは行わない（パフォーマンス優先）
       if (!isFast) transformer = transformer.rotate(); // EXIFに基づく自動回転

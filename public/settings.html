@@ -30,6 +30,10 @@
   .checkbox-row .switch.on { background:var(--switch-on-bg); }
   .checkbox-row .switch.on::after { transform:translateX(20px); }
   .checkbox-row .switch:focus { outline:2px solid rgba(0,0,0,0.12); outline-offset:3px; }
+  /* 子項目インデント（折り畳み対象の階層を視覚化） */
+  .row.child { padding-left: 16px; border-left: 2px solid var(--divider, rgba(0,0,0,0.08)); }
+  /* 狭幅時はインデントを少し弱めてはみ出しを防ぐ */
+  @media (max-width:600px){ .row.child { padding-left: 10px; } }
   </style>
 </head>
 <body>
@@ -98,7 +102,7 @@
               <label for="WEBP_DETAILED_ENABLED">詳細設定</label>
               <input type="checkbox" id="WEBP_DETAILED_ENABLED" name="WEBP_DETAILED_ENABLED" />
             </div>
-            <div class="row" id="webp-detailed-preset-row">
+            <div class="row child" id="webp-detailed-preset-row">
               <label for="WEBP_PRESET">プリセット</label>
               <select id="WEBP_PRESET" name="WEBP_PRESET">
                 <option value="default">default - 標準</option>
@@ -109,7 +113,7 @@
                 <option value="text">text - テキスト</option>
               </select>
             </div>
-            <div class="row" id="webp-detailed-reduction-row">
+            <div class="row child" id="webp-detailed-reduction-row">
               <label for="WEBP_REDUCTION_EFFORT">削減努力 (0=無効 ... 6=最大)</label>
               <div class="field-control">
                 <input id="WEBP_REDUCTION_EFFORT" name="WEBP_REDUCTION_EFFORT" type="range" step="1" min="0" max="6" />
@@ -458,7 +462,9 @@
         try {
           const compRow = compSlider ? compSlider.closest('.row') : null;
           const compFlag = byId('COMPRESSION_ENABLED');
-          if (compRow && compFlag) {
+        if (compRow && compFlag) {
+          // 子項目インデント
+          try { compRow.classList.add('child'); } catch(e) {}
             if (compFlag.checked) {
               compRow.classList.remove('hidden');
               // compRow.classList.remove('disabled');
@@ -563,6 +569,8 @@
         const rWin = byId('RATE_LIMIT_WINDOW_MS') ? byId('RATE_LIMIT_WINDOW_MS').closest('.row') : null;
         const rQueue = byId('RATE_LIMIT_QUEUE_SIZE') ? byId('RATE_LIMIT_QUEUE_SIZE').closest('.row') : null;
         if (rateFlag && (rReq || rWin || rQueue)) {
+          // 子項目インデント
+          try { [rReq, rWin, rQueue].forEach(r => { if (r) r.classList.add('child'); }); } catch(e) {}
           const disable = !rateFlag.checked;
           [rReq, rWin, rQueue].forEach(r => { if (!r) return; if (disable) { r.classList.add('hidden'); /* r.classList.add('disabled'); */ } else { r.classList.remove('hidden'); /* r.classList.remove('disabled'); */ } });
         }
@@ -572,6 +580,8 @@
         const restartFlag = byId('RESTART_ENABLED');
         const restartTimeRow = byId('RESTART_TIME') ? byId('RESTART_TIME').closest('.row') : null;
         if (restartFlag && restartTimeRow) {
+          // 子項目インデント
+          try { restartTimeRow.classList.add('child'); } catch(e) {}
           if (restartFlag.checked) {
             restartTimeRow.classList.remove('hidden');
             // restartTimeRow.classList.remove('disabled');
@@ -579,6 +589,20 @@
             restartTimeRow.classList.add('hidden');
             // restartTimeRow.classList.add('disabled');
           }
+        }
+      } catch(e) {}
+  // WEBP_DETAILED_ENABLED の初期状態に応じて関連行を有効/無効化（初期表示時の折り畳み解除対応）
+      try {
+        const webpDetailedFlag = byId('WEBP_DETAILED_ENABLED');
+        const webpPresetRow = byId('webp-detailed-preset-row');
+        const webpReductionRow = byId('webp-detailed-reduction-row');
+        if (webpDetailedFlag && (webpPresetRow || webpReductionRow)) {
+          const disable = !webpDetailedFlag.checked;
+          [webpPresetRow, webpReductionRow].forEach(r => {
+            if (!r) return;
+            if (disable) { r.classList.add('hidden'); /* r.classList.add('disabled'); */ }
+            else { r.classList.remove('hidden'); /* r.classList.remove('disabled'); */ }
+          });
         }
       } catch(e) {}
   // PHOTO_SIZE スライダー表示を更新 (px 表示)
@@ -796,6 +820,33 @@
       }
       loadConfig();
       loadTheme();
+      
+      // システム情報を取得して並列数上限を動的に設定
+      (async () => {
+        try {
+          const r = await fetch('/setting/sysinfo');
+          if (r.ok) {
+            const sysInfo = await r.json();
+            const mSlider = byId('MAX_CONCURRENCY');
+            if (mSlider) {
+              mSlider.max = sysInfo.maxConcurrency || 32;
+              mSlider.setAttribute('data-recommended', sysInfo.recommendedConcurrency || 4);
+              // 推奨値を表示するためのラベルにツールチップを追加
+              const label = mSlider.closest('.row')?.querySelector('label');
+              if (label && sysInfo.recommendedConcurrency) {
+                const tip = document.createElement('span');
+                tip.textContent = ` （推奨: ${sysInfo.recommendedConcurrency}）`;
+                tip.style.fontSize = '0.9em';
+                tip.style.opacity = '0.7';
+                label.appendChild(tip);
+              }
+            }
+          }
+        } catch(e) {
+          // システム情報取得エラーは無視（デフォルト値を使用）
+        }
+      })();
+      
       // スナップショットが取得されるまで保存ボタンを無効化
       setSaveEnabled(false);
       // 未保存状態を検出するための変更リスナーを配線

@@ -27,9 +27,6 @@ const {
   getServerRootPath, // サーバールートパス - WebDAVサーバーのルートディレクトリパス
 } = require("./config"); // 設定管理モジュール
 
-// スタック処理モジュール
-const { initializeStackSystem } = require("./stack"); // スタック処理システムの初期化
-
 // 画像変換モジュール
 const { convertAndRespond, convertAndRespondWithLimit } = require("./image"); // 画像変換モジュール
 
@@ -46,9 +43,6 @@ function startWebDAV(activeCacheDir) {
   // config.txtから動的に設定を読み込み
   const PORT = getServerPort(); // サーバーポート - WebDAVサーバーのポート番号
   const ROOT_PATH = getServerRootPath(); // サーバールートパス - WebDAVサーバーのルートディレクトリパス
-
-  // スタック処理システムの初期化（サーバーインスタンスごとに一度だけ）
-  const { requestStack, serverMonitor } = initializeStackSystem(); // スタック処理システムの初期化
 
   // 動的設定読み込み関数
   const getPhotoSize = () => getDynamicConfig("PHOTO_SIZE", 1024); // 写真サイズ - 写真サイズ
@@ -499,6 +493,35 @@ function startWebDAV(activeCacheDir) {
             const publicDir = path.join(__dirname, "..", "public"); // パスを結合
             const cfgPath = path.join(__dirname, "..", "config.txt"); // パスを結合
 
+            // GET /setting/sysinfo -> システム情報を含むJSON（APIエンドポイントを先に処理）
+            if (
+              req.method === "GET" && // GETメソッドの場合
+              (urlPath === "/setting/sysinfo" || urlPath === "/setting/sysinfo/") // "setting/sysinfo"または"setting/sysinfo/"の場合
+            ) {
+              try {
+                const cpuCount = os.cpus().length;
+                const totalMemory = os.totalmem();
+                const totalMemoryGB = Math.round((totalMemory / (1024 * 1024 * 1024)) * 10) / 10;
+                const recommendedConcurrency = Math.max(4, Math.min(cpuCount, 32));
+                const recommendedMemory = Math.max(256, Math.min(Math.floor(totalMemoryGB * 1024 * 0.25), 8192));
+                
+                const sysInfo = {
+                  cpuCount,
+                  totalMemoryGB,
+                  recommendedConcurrency,
+                  recommendedMemory,
+                  maxConcurrency: 32 // 最大並列数の制限
+                };
+                
+                res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+                return res.end(JSON.stringify(sysInfo));
+              } catch (e) {
+                logger.warn("[sysinfo error]", e);
+                res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+                return res.end(JSON.stringify({ error: "sysinfo_error" }));
+              }
+            }
+
             // public/settings.htmlからメインUIを提供
             if (
               req.method === "GET" && // GETメソッドの場合
@@ -704,7 +727,21 @@ function startWebDAV(activeCacheDir) {
                     "Keep-Alive": "timeout=600", // 接続タイムアウトを600秒に設定
                   }; // ヘッダーを設定
                   res.writeHead(200, headers); // ステータスコードを200に設定してヘッダーを送信
-                  return fs.createReadStream(cachePath).pipe(res); // キャッシュファイルを読み込んでレスポンス
+                  try {
+                    const s = fs.createReadStream(cachePath);
+                    const onErr = (e) => {
+                      logger.warn("[cache stream error]", e);
+                      try { if (!res.headersSent) res.writeHead(500); } catch(_) {}
+                      try { res.end("Internal error"); } catch(_) {}
+                    };
+                    s.on('error', onErr);
+                    res.on('close', () => { try { s.destroy(); } catch(_) {} });
+                    return s.pipe(res);
+                  } catch (e) {
+                    logger.warn("[cache stream open error]", e);
+                    try { if (!res.headersSent) res.writeHead(500); } catch(_) {}
+                    return res.end("Internal error");
+                  }
                 }
               } catch (e) {
                 logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
@@ -712,16 +749,24 @@ function startWebDAV(activeCacheDir) {
             }
 
             // 画像変換を実行（並列制限付き）
-            await convertAndRespondWithLimit({
-              fullPath, // ファイルパス
-              displayPath, // 表示パス
-              cachePath: shouldCache ? cachePath : null, // キャッシュパス
-              quality, // 品質
-              Photo_Size: getPhotoSize(), // 写真サイズ
-              res, // レスポンス
-              clientIP, // クライアントIP
-            }); // 画像変換を実行
-          })(); // 即座に非同期関数を実行
+            try {
+              await convertAndRespondWithLimit({
+                fullPath, // ファイルパス
+                displayPath, // 表示パス
+                cachePath: shouldCache ? cachePath : null, // キャッシュパス
+                quality, // 品質
+                Photo_Size: getPhotoSize(), // 写真サイズ
+                res, // レスポンス
+                clientIP, // クライアントIP
+              }); // 画像変換を実行
+            } catch (e) {
+              logger.warn("[convert error]", e);
+              try { res.writeHead(500); res.end('Internal error'); } catch (_) {}
+            }
+          })().catch((e) => {
+            logger.warn('[async convert handler error]', e);
+            try { if (!res.headersSent) { res.writeHead(500); res.end('Internal error'); } } catch (_) {}
+          }); // 即座に非同期関数を実行
 
           return; // 非同期処理なので即座にレスポンスを返さない
         }

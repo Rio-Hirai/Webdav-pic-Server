@@ -78,10 +78,6 @@ const pipeline = promisify(stream.pipeline);
 const cache = require("./.core/cache");
 const { initializeCacheSystem } = cache;
 
-// スタック処理モジュール
-const stack = require("./.core/stack");
-const { initializeStackSystem } = stack;
-
 // 画像変換モジュール
 const image = require("./.core/image");
 const { convertAndRespond, reinitializeConcurrency } = image;
@@ -89,6 +85,56 @@ const { convertAndRespond, reinitializeConcurrency } = image;
 // WebDAVサーバーモジュール
 const webdavServer = require("./.core/webdav");
 const { startWebDAV } = webdavServer;
+
+// ========= グローバルエラーハンドラ（安定性向上） =========
+// 未処理例外でプロセスが落ちないように捕捉してログを出す
+process.on('unhandledRejection', (reason, promise) => {
+  try {
+    logger.error('[unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+  } catch (_) {
+    console.error('[unhandledRejection]', reason);
+  }
+});
+
+process.on('uncaughtException', (err) => {
+  try {
+    logger.error('[uncaughtException]', err && err.stack ? err.stack : err);
+  } catch (_) {
+    console.error('[uncaughtException]', err);
+  }
+  // 継続実行（プロセスは落とさない）
+});
+
+process.on('warning', (warning) => {
+  try {
+    logger.warn('[process warning]', warning && warning.stack ? warning.stack : warning);
+  } catch (_) {
+    console.warn('[process warning]', warning);
+  }
+});
+
+/**
+ * システム情報取得関数
+ * CPU数とメモリ情報から推奨並列数を算出
+ */
+function getSystemInfo() {
+  const cpuCount = os.cpus().length; // CPU数
+  const totalMemory = os.totalmem(); // 総メモリ（バイト）
+  const totalMemoryGB = totalMemory / (1024 * 1024 * 1024); // GB換算
+  
+  // 推奨並列数: CPU数に基づく（最小4、最大CPU数）
+  const recommendedConcurrency = Math.max(4, Math.min(cpuCount, 32));
+  
+  // 推奨メモリ上限: 総メモリの25%（最小256MB、最大8192MB）
+  const recommendedMemory = Math.max(256, Math.min(Math.floor(totalMemoryGB * 1024 * 0.25), 8192));
+  
+  return {
+    cpuCount,
+    totalMemoryGB: Math.round(totalMemoryGB * 10) / 10,
+    recommendedConcurrency,
+    recommendedMemory
+  };
+}
 
 // Sharpの初期設定関数（動的設定関数の定義後に配置）
 function configureSharp() {
@@ -103,6 +149,10 @@ function configureSharp() {
       files: 150, // ファイルキャッシュ数を増加（メモリ効率向上）
       items: 300, // アイテムキャッシュ数を増加（メモリ効率向上）
     });
+    
+    // システム情報を取得してログ出力
+    const sysInfo = getSystemInfo();
+    logger.info(`[システム情報] CPU: ${sysInfo.cpuCount}コア, メモリ: ${sysInfo.totalMemoryGB}GB, 推奨並列数: ${sysInfo.recommendedConcurrency}, 推奨メモリ: ${sysInfo.recommendedMemory}MB`);
     logger.info(`[Sharp設定] concurrency=${maxConcurrency}, memory=${memoryLimit}MB, files=150, items=300`);
   } catch (e) {
     logger.warn("failed to configure sharp performance settings", e);
@@ -111,9 +161,6 @@ function configureSharp() {
 
 // Sharpの初期設定を実行
 configureSharp();
-
-// スタック処理システムの初期化
-const { requestStack, serverMonitor } = initializeStackSystem();
 
 // キャッシュシステムの初期化
 const activeCacheDir = initializeCacheSystem();

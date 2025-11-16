@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta http-equiv="Content-Language" content="ja" />
   <title>⚙️ WebDAV Pic Server - Settings</title>
   <link rel="stylesheet" href="/setting/css/settings.css">
   <!-- favicons: add both /icons and /setting/icons paths to match server static routing -->
@@ -15,26 +14,6 @@
   <link rel="alternate icon" type="image/png" href="/setting/icons/favicon-256.png">
   <link rel="alternate icon" type="image/webp" href="/icons/favicon-256.webp">
   <link rel="alternate icon" type="image/webp" href="/setting/icons/favicon-256.webp">
-  <style>
-  /* Toggle switch minimal styles (kept inline for small feature) */
-  .checkbox-row { display:flex; align-items:center; gap:8px; }
-  /* 視覚的な無効（ディアクティブ）状態のスタイル */
-  .row.disabled { opacity: 0.5; }
-  /* 非表示クラス: 要素を DOM 上で隠す（出現/消滅） */
-  .row.hidden { display: none; }
-  .row.disabled .field-control { pointer-events: none; }
-  .checkbox-row label { margin:0; }
-  .checkbox-row input[type="checkbox"] { display:none; }
-  .checkbox-row .switch { display:inline-block; width:44px; height:24px; background:var(--switch-off-bg); border-radius:999px; position:relative; transition:background .15s ease; margin-left:8px; }
-  .checkbox-row .switch::after { content:''; position:absolute; left:3px; top:3px; width:18px; height:18px; background:var(--switch-knob); border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,0.2); transition:transform .15s ease; }
-  .checkbox-row .switch.on { background:var(--switch-on-bg); }
-  .checkbox-row .switch.on::after { transform:translateX(20px); }
-  .checkbox-row .switch:focus { outline:2px solid rgba(0,0,0,0.12); outline-offset:3px; }
-  /* 子項目インデント（折り畳み対象の階層を視覚化） */
-  .row.child { padding-left: 16px; border-left: 2px solid var(--divider, rgba(0,0,0,0.08)); }
-  /* 狭幅時はインデントを少し弱めてはみ出しを防ぐ */
-  @media (max-width:600px){ .row.child { padding-left: 10px; } }
-  </style>
 </head>
 <body>
   <div class="container">
@@ -50,8 +29,12 @@
         <form id="settingsForm" autocomplete="off">
 
           <div class="field-group">
-            <h3>画像変換設定</h3>
-            <div class="row">
+            <h2>画像変換設定</h2>
+            <div class="row checkbox-row">
+              <label for="IMAGE_CONVERSION_ENABLED">画像変換機能を有効にする</label>
+              <input type="checkbox" id="IMAGE_CONVERSION_ENABLED" name="IMAGE_CONVERSION_ENABLED" />
+            </div>
+            <div class="row" id="image-template-row">
               <label for="IMAGE_TEMPLATE">テンプレート</label>
               <select id="IMAGE_TEMPLATE" name="IMAGE_TEMPLATE">
                 <option value="">未選択</option>
@@ -62,21 +45,21 @@
                 <option value="large">4 - 高画質</option>
               </select>
             </div>
-            <div class="row">
+            <div class="row child" id="photo-size-row">
               <label for="PHOTO_SIZE">最大画像サイズ (px)</label>
               <div class="field-control">
                 <input id="PHOTO_SIZE" name="PHOTO_SIZE" type="range" step="16" min="320" max="2400" />
                 <output id="PHOTO_SIZE_VAL" for="PHOTO_SIZE">1080</output>
               </div>
             </div>
-            <div class="row">
+            <div class="row child" id="default-quality-row">
               <label for="DEFAULT_QUALITY">品質（1 〜 100）</label>
               <div class="field-control">
                 <input id="DEFAULT_QUALITY" name="DEFAULT_QUALITY" type="range" step="1" min="1" max="100" />
                 <output id="DEFAULT_QUALITY_VAL" for="DEFAULT_QUALITY">50</output>
               </div>
             </div>
-            <div class="row">
+            <div class="row child" id="image-mode-row">
               <label for="IMAGE_MODE">画像処理モード</label>
               <select id="IMAGE_MODE" name="IMAGE_MODE">
                 <option value="1">1 - 高速（低負荷）</option>
@@ -84,21 +67,21 @@
                 <option value="3">3 - 高圧縮（高負荷）</option>
               </select>
             </div>
-            <div class="row">
+            <div class="row child" id="webp-effort-row">
               <label for="WEBP_EFFORT">圧縮努力 (0=最速 ... 6=最高圧縮)</label>
               <div class="field-control">
                 <input id="WEBP_EFFORT" name="WEBP_EFFORT" type="range" step="1" min="0" max="6" />
                 <output id="WEBP_EFFORT_VAL" for="WEBP_EFFORT">1</output>
               </div>
             </div>
-            <div class="row">
+            <div class="row child" id="webp-effort-fast-row">
               <label for="WEBP_EFFORT_FAST">圧縮努力 (高速モード用)</label>
               <div class="field-control">
                 <input id="WEBP_EFFORT_FAST" name="WEBP_EFFORT_FAST" type="range" step="1" min="0" max="2" />
                 <output id="WEBP_EFFORT_FAST_VAL" for="WEBP_EFFORT_FAST">0</output>
               </div>
             </div>
-            <div class="row checkbox-row">
+            <div class="row child checkbox-row" id="webp-detailed-enabled-row">
               <label for="WEBP_DETAILED_ENABLED">詳細設定</label>
               <input type="checkbox" id="WEBP_DETAILED_ENABLED" name="WEBP_DETAILED_ENABLED" />
             </div>
@@ -125,7 +108,7 @@
           </div>
 
           <div class="field-group">
-            <h3>レスポンス圧縮設定</h3>
+            <h2>レスポンス圧縮設定</h2>
             <div class="row checkbox-row">
               <label for="COMPRESSION_ENABLED">gzip 圧縮を有効にする</label>
               <input id="COMPRESSION_ENABLED" name="COMPRESSION_ENABLED" type="checkbox" />
@@ -141,14 +124,14 @@
           </div>
 
           <div class="field-group">
-            <h3>キャッシュ / メモリ</h3>
+            <h2>キャッシュ / メモリ</h2>
             <div class="row">
               <label for="CACHE_TTL_MS">キャッシュ有効期限 (秒)</label>
-              <input id="CACHE_TTL_MS" name="CACHE_TTL_MS" type="number" min="0" inputmode="numeric" pattern="[0-9]*" />
+              <input id="CACHE_TTL_MS" name="CACHE_TTL_MS" type="number" min="0" inputmode="numeric" title="数値を入力してください" />
             </div>
             <div class="row">
               <label for="CACHE_MIN_SIZE">キャッシュ対象の最小サイズ (KB)</label>
-              <input id="CACHE_MIN_SIZE" name="CACHE_MIN_SIZE" type="number" min="0" inputmode="numeric" pattern="[0-9]*" />
+              <input id="CACHE_MIN_SIZE" name="CACHE_MIN_SIZE" type="number" min="0" inputmode="numeric" title="数値を入力してください (KB)" />
             </div>
             <div class="row">
               <label for="MAX_CONCURRENCY">同時処理数の上限（1 〜 32）</label>
@@ -172,10 +155,10 @@
           </div>
 
           <div class="field-group">
-            <h3>サーバー設定</h3>
+            <h2>サーバー設定</h2>
             <div class="row">
               <label for="PORT">待ち受けポート番号</label>
-              <input id="PORT" name="PORT" type="number" min="1" max="65535" inputmode="numeric" pattern="[0-9]*" />
+              <input id="PORT" name="PORT" type="number" min="1" max="65535" inputmode="numeric" title="1〜65535 の整数を入力してください" />
             </div>
             <div class="row">
               <label for="ROOT_PATH">ルートパス</label>
@@ -183,45 +166,45 @@
             </div>
             <div class="row">
               <label for="MAX_LIST">ディレクトリ一覧の最大件数</label>
-              <input id="MAX_LIST" name="MAX_LIST" type="number" min="1" inputmode="numeric" pattern="[0-9]*" />
+              <input id="MAX_LIST" name="MAX_LIST" type="number" min="1" inputmode="numeric" title="1 以上の整数を入力してください" />
             </div>
             <!-- <div class="desc">サーバーの待ち受けポート、WebDAV のルートフォルダ、ディレクトリ一覧で表示する最大件数を指定</div> -->
           </div>
 
           <div class="field-group">
-            <h3>レート制限</h3>
+            <h2>レート制限</h2>
             <div class="row checkbox-row">
               <label for="RATE_LIMIT_ENABLED">レート制限を有効にする</label>
               <input id="RATE_LIMIT_ENABLED" name="RATE_LIMIT_ENABLED" type="checkbox" />
             </div>
             <div class="row">
               <label for="RATE_LIMIT_REQUESTS">許可リクエスト数</label>
-              <input id="RATE_LIMIT_REQUESTS" name="RATE_LIMIT_REQUESTS" type="number" min="0" inputmode="numeric" pattern="[0-9]*" />
+              <input id="RATE_LIMIT_REQUESTS" name="RATE_LIMIT_REQUESTS" type="number" min="0" inputmode="numeric" title="数値を入力してください" />
             </div>
             <div class="row">
               <label for="RATE_LIMIT_WINDOW_MS">リクエスト生存時間 (秒)</label>
-              <input id="RATE_LIMIT_WINDOW_MS" name="RATE_LIMIT_WINDOW_MS" type="number" min="0" inputmode="numeric" pattern="[0-9]*" />
+              <input id="RATE_LIMIT_WINDOW_MS" name="RATE_LIMIT_WINDOW_MS" type="number" min="0" inputmode="numeric" title="数値を入力してください (秒)" />
             </div>
             <div class="row">
               <label for="RATE_LIMIT_QUEUE_SIZE">レート制限キューサイズ</label>
-              <input id="RATE_LIMIT_QUEUE_SIZE" name="RATE_LIMIT_QUEUE_SIZE" type="number" min="0" inputmode="numeric" pattern="[0-9]*" />
+              <input id="RATE_LIMIT_QUEUE_SIZE" name="RATE_LIMIT_QUEUE_SIZE" type="number" min="0" inputmode="numeric" title="数値を入力してください" />
             </div>
             <!-- <div class="desc">大量アクセス対策の設定です。負荷状況に応じて調整してください。</div> -->
           </div>
 
           <div class="field-group">
-            <h3>緊急 / スタック / 再起動</h3>
+            <h2>緊急 / スタック / 再起動</h2>
             <div class="row checkbox-row">
               <label for="EMERGENCY_DISABLE_RATE_LIMIT">緊急時にレート制限を無効化する</label>
               <input id="EMERGENCY_DISABLE_RATE_LIMIT" name="EMERGENCY_DISABLE_RATE_LIMIT" type="checkbox" />
             </div>
             <div class="row">
               <label for="STACK_MAX_SIZE">スタック最大サイズ</label>
-              <input id="STACK_MAX_SIZE" name="STACK_MAX_SIZE" type="number" min="1" inputmode="numeric" pattern="[0-9]*" />
+              <input id="STACK_MAX_SIZE" name="STACK_MAX_SIZE" type="number" min="1" inputmode="numeric" title="1 以上の整数を入力してください" />
             </div>
             <div class="row">
               <label for="STACK_PROCESSING_DELAY_MS">スタック処理遅延 (ms)</label>
-              <input id="STACK_PROCESSING_DELAY_MS" name="STACK_PROCESSING_DELAY_MS" type="number" min="0" inputmode="numeric" pattern="[0-9]*" />
+              <input id="STACK_PROCESSING_DELAY_MS" name="STACK_PROCESSING_DELAY_MS" type="number" min="0" inputmode="numeric" title="数値を入力してください (ms)" />
             </div>
             <!-- <div class="row checkbox-row">
               <label for="RESTART_ENABLED">自動再起動を有効にする</label>
@@ -235,7 +218,7 @@
           </div>
 
           <div class="field-group">
-            <h3>その他</h3>
+            <h2>その他</h2>
             <div class="row">
               <label for="MAGICK_PATH">ImageMagick コマンド / パス</label>
               <input id="MAGICK_PATH" name="MAGICK_PATH" type="text" />
@@ -253,12 +236,13 @@
           </div>
           -->
 
+          </div>
         </form>
       </div>
 
       <!--
       <div class="card">
-        <h3>項目説明</h3>
+        <h2>項目説明</h2>
         <div class="small">
           このパネルでは各設定項目の簡単な説明を表示します。フォームで値を変更して <strong>Save</strong> を押すとサーバ上の <code>config.txt</code> を上書きします。運用中は必ずバックアップを取ってから変更してください。
         </div>
@@ -365,7 +349,7 @@
     const keys = [
       'COMPRESSION_ENABLED','COMPRESSION_THRESHOLD',
       'PORT','ROOT_PATH','MAX_LIST',
-  'PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE',
+  'IMAGE_CONVERSION_ENABLED','PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE',
   'CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT','WEBP_EFFORT','WEBP_EFFORT_FAST','WEBP_PRESET','WEBP_REDUCTION_EFFORT','WEBP_DETAILED_ENABLED',
   'RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE',
       'EMERGENCY_DISABLE_RATE_LIMIT','STACK_MAX_SIZE','STACK_PROCESSING_DELAY_MS',
@@ -542,12 +526,35 @@
           reOut.textContent = isNaN(n) ? '0' : String(Math.round(n));
         }
       } catch(e) {}
-  // IMAGE_MODE に応じて WebP effort の行を有効/無効化
+  // IMAGE_CONVERSION_ENABLED の初期状態に応じて画像変換関連項目を有効/無効化
       try {
+        const imgConvFlag = byId('IMAGE_CONVERSION_ENABLED');
+        const imgTemplateRow = byId('image-template-row');
+        const photoSizeRow = byId('photo-size-row');
+        const defaultQualityRow = byId('default-quality-row');
+        const imageModeRow = byId('image-mode-row');
+        const webpEffortRow = byId('webp-effort-row');
+        const webpEffortFastRow = byId('webp-effort-fast-row');
+        const webpDetailedEnabledRow = byId('webp-detailed-enabled-row');
+        const webpPresetRow = byId('webp-detailed-preset-row');
+        const webpReductionRow = byId('webp-detailed-reduction-row');
+        if (imgConvFlag && (imgTemplateRow || photoSizeRow || defaultQualityRow || imageModeRow)) {
+          // 子項目インデント
+          try { [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach(r => { if (r) r.classList.add('child'); }); } catch(e) {}
+          const disable = !imgConvFlag.checked;
+          [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach(r => {
+            if (!r) return;
+            if (disable) { r.classList.add('hidden'); /* r.classList.add('disabled'); */ } else { r.classList.remove('hidden'); /* r.classList.remove('disabled'); */ }
+          });
+        }
+      } catch(e) {}
+  // IMAGE_MODE に応じて WebP effort の行を有効/無効化（IMAGE_CONVERSION_ENABLEDが有効な場合のみ）
+      try {
+        const imgConvFlag = byId('IMAGE_CONVERSION_ENABLED');
         const imgMode = byId('IMAGE_MODE');
         const webpRow = byId('WEBP_EFFORT') ? byId('WEBP_EFFORT').closest('.row') : null;
         const webpFastRow = byId('WEBP_EFFORT_FAST') ? byId('WEBP_EFFORT_FAST').closest('.row') : null;
-        if (imgMode && webpRow && webpFastRow) {
+        if (imgMode && webpRow && webpFastRow && imgConvFlag && imgConvFlag.checked) {
           // モード '1' = 高速モード (高速用 effort を有効にする)
           if (String(imgMode.value) === '1') {
             webpRow.classList.add('hidden');
@@ -560,6 +567,23 @@
             webpFastRow.classList.add('hidden');
             // webpFastRow.classList.add('disabled');
           }
+        }
+      } catch(e) {}
+  // WEBP_DETAILED_ENABLED の初期状態に応じて関連行を有効/無効化（IMAGE_CONVERSION_ENABLEDが有効な場合のみ）
+      try {
+        const imgConvFlag = byId('IMAGE_CONVERSION_ENABLED');
+        const webpDetailedFlag = byId('WEBP_DETAILED_ENABLED');
+        const webpPresetRow = byId('webp-detailed-preset-row');
+        const webpReductionRow = byId('webp-detailed-reduction-row');
+        if (webpDetailedFlag && (webpPresetRow || webpReductionRow) && imgConvFlag && imgConvFlag.checked) {
+          // さらに深い階層の子項目インデント
+          try { [webpPresetRow, webpReductionRow].forEach(r => { if (r) { r.classList.remove('child'); r.classList.add('child-2'); } }); } catch(e) {}
+          const disable = !webpDetailedFlag.checked;
+          [webpPresetRow, webpReductionRow].forEach(r => {
+            if (!r) return;
+            if (disable) { r.classList.add('hidden'); /* r.classList.add('disabled'); */ }
+            else { r.classList.remove('hidden'); /* r.classList.remove('disabled'); */ }
+          });
         }
       } catch(e) {}
   // RATE_LIMIT_ENABLED に応じてレート制限関連行を有効/無効化
@@ -596,13 +620,18 @@
         const webpDetailedFlag = byId('WEBP_DETAILED_ENABLED');
         const webpPresetRow = byId('webp-detailed-preset-row');
         const webpReductionRow = byId('webp-detailed-reduction-row');
-        if (webpDetailedFlag && (webpPresetRow || webpReductionRow)) {
+        const imgConvFlag = byId('IMAGE_CONVERSION_ENABLED');
+        // 表示切替は画像変換機能が有効な場合にのみ反映する。
+        if (webpDetailedFlag && (webpPresetRow || webpReductionRow) && imgConvFlag && imgConvFlag.checked) {
           const disable = !webpDetailedFlag.checked;
           [webpPresetRow, webpReductionRow].forEach(r => {
             if (!r) return;
             if (disable) { r.classList.add('hidden'); /* r.classList.add('disabled'); */ }
             else { r.classList.remove('hidden'); /* r.classList.remove('disabled'); */ }
           });
+        } else {
+          // IMAGE_CONVERSION_ENABLED が無効な場合は常に折り畳む
+          [webpPresetRow, webpReductionRow].forEach(r => { if (!r) return; r.classList.add('hidden'); });
         }
       } catch(e) {}
   // PHOTO_SIZE スライダー表示を更新 (px 表示)
@@ -679,7 +708,7 @@
       const groups = [
         ['COMPRESSION_ENABLED','COMPRESSION_THRESHOLD'],
         ['PORT','ROOT_PATH','MAX_LIST'],
-        ['PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE'],
+        ['IMAGE_CONVERSION_ENABLED','PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE'],
         ['WEBP_EFFORT','WEBP_EFFORT_FAST','WEBP_PRESET','WEBP_REDUCTION_EFFORT','WEBP_DETAILED_ENABLED'],
         ['CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT'],
         ['RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE'],
@@ -1019,13 +1048,14 @@
         });
       }
 
-      // IMAGE_MODE の変更に応じて WEBP_EFFORT 行の有効/無効を切り替える
+      // IMAGE_MODE の変更に応じて WEBP_EFFORT 行の有効/無効を切り替える（IMAGE_CONVERSION_ENABLEDが有効な場合のみ）
       try {
+        const imgConvFlag = byId('IMAGE_CONVERSION_ENABLED');
         const imgModeEl = byId('IMAGE_MODE');
         const webpRow = byId('WEBP_EFFORT') ? byId('WEBP_EFFORT').closest('.row') : null;
         const webpFastRow = byId('WEBP_EFFORT_FAST') ? byId('WEBP_EFFORT_FAST').closest('.row') : null;
         const toggleWebpRows = () => {
-          if (!imgModeEl || !webpRow || !webpFastRow) return;
+          if (!imgModeEl || !webpRow || !webpFastRow || !imgConvFlag || !imgConvFlag.checked) return;
           if (String(imgModeEl.value) === '1') {
               webpRow.classList.add('hidden');
               // webpRow.classList.add('disabled');
@@ -1080,13 +1110,74 @@
         }
       } catch(e) {}
 
-      // WEBP_DETAILED_ENABLED の切替で詳細設定項目を有効/無効化
+      // IMAGE_CONVERSION_ENABLED の切替で画像変換関連項目を有効/無効化
       try {
+        const imgConvFlag = byId('IMAGE_CONVERSION_ENABLED');
+        const imgModeEl = byId('IMAGE_MODE');
+        const webpDetailedFlag = byId('WEBP_DETAILED_ENABLED');
+        const imgTemplateRow = byId('image-template-row');
+        const photoSizeRow = byId('photo-size-row');
+        const defaultQualityRow = byId('default-quality-row');
+        const imageModeRow = byId('image-mode-row');
+        const webpEffortRow = byId('webp-effort-row');
+        const webpEffortFastRow = byId('webp-effort-fast-row');
+        const webpDetailedEnabledRow = byId('webp-detailed-enabled-row');
+        const webpPresetRow = byId('webp-detailed-preset-row');
+        const webpReductionRow = byId('webp-detailed-reduction-row');
+        const toggleImageConversionRows = () => {
+          if (!imgConvFlag) return;
+          const disable = !imgConvFlag.checked;
+          [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach(r => {
+            if (!r) return;
+            if (disable) {
+              r.classList.add('hidden');
+              /* r.classList.add('disabled'); */
+            } else {
+              r.classList.remove('hidden');
+              /* r.classList.remove('disabled'); */
+            }
+          });
+          // IMAGE_CONVERSION_ENABLEDが有効になった場合、IMAGE_MODEに応じてWEBP_EFFORTとWEBP_EFFORT_FASTの表示を切り替える
+          if (!disable && imgModeEl && webpEffortRow && webpEffortFastRow) {
+            if (String(imgModeEl.value) === '1') {
+              webpEffortRow.classList.add('hidden');
+              webpEffortFastRow.classList.remove('hidden');
+            } else {
+              webpEffortRow.classList.remove('hidden');
+              webpEffortFastRow.classList.add('hidden');
+            }
+          }
+          // IMAGE_CONVERSION_ENABLEDが有効になった場合、WEBP_DETAILED_ENABLEDに応じて詳細設定項目の表示を切り替える
+          if (!disable && webpDetailedFlag && webpPresetRow && webpReductionRow) {
+            // さらに深い階層の子項目インデント
+            try { [webpPresetRow, webpReductionRow].forEach(r => { if (r) { r.classList.remove('child'); r.classList.add('child-2'); } }); } catch(e) {}
+            const detailedDisable = !webpDetailedFlag.checked;
+            [webpPresetRow, webpReductionRow].forEach(r => {
+              if (!r) return;
+              if (detailedDisable) {
+                r.classList.add('hidden');
+              } else {
+                r.classList.remove('hidden');
+              }
+            });
+          }
+        };
+        if (imgConvFlag) {
+          imgConvFlag.addEventListener('change', () => { try { toggleImageConversionRows(); checkDirty(); } catch(e) {} });
+          toggleImageConversionRows();
+        }
+      } catch(e) {}
+
+      // WEBP_DETAILED_ENABLED の切替で詳細設定項目を有効/無効化（IMAGE_CONVERSION_ENABLEDが有効な場合のみ）
+      try {
+        const imgConvFlag = byId('IMAGE_CONVERSION_ENABLED');
         const webpDetailedFlag = byId('WEBP_DETAILED_ENABLED');
         const webpPresetRow = byId('webp-detailed-preset-row');
         const webpReductionRow = byId('webp-detailed-reduction-row');
         const toggleWebpDetailedRows = () => {
-          if (!webpDetailedFlag) return;
+          if (!webpDetailedFlag || !imgConvFlag || !imgConvFlag.checked) return;
+          // さらに深い階層の子項目インデント
+          try { [webpPresetRow, webpReductionRow].forEach(r => { if (r) { r.classList.remove('child'); r.classList.add('child-2'); } }); } catch(e) {}
           const disable = !webpDetailedFlag.checked;
           [webpPresetRow, webpReductionRow].forEach(r => { 
             if (!r) return; 

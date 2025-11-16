@@ -376,3 +376,34 @@ body, .card, pre { transition: background-color 220ms ease, color 220ms ease, bo
 	   - 最小60px、最大100pxで適切なサイズを保持 */
 	.fixed-bar #themeToggle{ flex: 0 0 auto; min-width: 60px; max-width: 100px; padding: 12px 16px; }
 }
+
+/* Toggle switch minimal styles (settings.html から移動) */
+.checkbox-row { display:flex; align-items:center; gap:8px; }
+/* 視覚的な無効（ディアクティブ）状態のスタイル */
+.row.disabled { opacity: 0.5; }
+/* 非表示クラス: 要素を DOM 上で隠す（出現/消滅） */
+.row.hidden { display: none; }
+.row.disabled .field-control { pointer-events: none; }
+.checkbox-row label { margin:0; }
+.checkbox-row input[type="checkbox"] { display:none; }
+.checkbox-row .switch { display:inline-block; width:44px; height:24px; background:var(--switch-off-bg); border-radius:999px; position:relative; transition:background .15s ease; margin-left:8px; }
+.checkbox-row .switch::after { content:''; position:absolute; left:3px; top:3px; width:18px; height:18px; background:var(--switch-knob); border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,0.2); transition:transform .15s ease; }
+.checkbox-row .switch.on { background:var(--switch-on-bg); }
+.checkbox-row .switch.on::after { transform:translateX(20px); }
+.checkbox-row .switch:focus { outline:2px solid rgba(0,0,0,0.12); outline-offset:3px; }
+/* 子項目インデント（折り畳み対象の階層を視覚化） */
+.row.child { padding-left: 16px; border-left: 2px solid var(--divider, rgba(0,0,0,0.08)); }
+/* childのスライダーと数値の間隔を詰める */
+.row.child .field-control { gap: 8px; }
+.row.child .field-control input[type="range"] { margin-right: 8px; }
+/* child内の数値表示をコンパクト化 */
+.row.child .field-control output { min-width: 44px; padding: 4px 6px; }
+/* さらに深い階層の子項目インデント */
+.row.child-2 { padding-left: 28px; border-left: 2px solid var(--divider, rgba(0,0,0,0.08)); }
+/* child-2のスライダーと数値の間隔をさらに詰める */
+.row.child-2 .field-control { gap: 4px; }
+.row.child-2 .field-control input[type="range"] { margin-right: 4px; }
+/* child-2内の数値表示をコンパクト化 */
+.row.child-2 .field-control output { min-width: 44px; padding: 4px 6px; }
+/* 狭幅時はインデントを少し弱めてはみ出しを防ぐ */
+@media (max-width:600px){ .row.child { padding-left: 10px; } .row.child-2 { padding-left: 16px; } }

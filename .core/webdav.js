@@ -21,6 +21,7 @@ const {
   getDynamicConfig, // 動的設定取得 - 設定値の動的取得
   getCompressionEnabled, // 圧縮有効フラグ - 圧縮機能の有効/無効
   getCompressionThreshold, // 圧縮閾値 - 圧縮閾値
+  getImageConversionEnabled, // 画像変換有効フラグ - 画像変換機能の有効/無効
   getCacheMinSize, // キャッシュ最小サイズ - キャッシュが有効なファイルサイズの最小値
   getCacheTTL, // キャッシュTTL - キャッシュの有効期限
   getServerPort, // サーバーポート - WebDAVサーバーのポート番号
@@ -549,8 +550,19 @@ function startWebDAV(activeCacheDir) {
               const rel = urlPath.slice(SETTING_PREFIX.length + 1); // "setting/"を削除
               const filePath = path.join(publicDir, rel); // パスを結合
               try {
-                const data = await fs.promises.readFile(filePath); // ファイルデータを読み込む
-                const contentType = getContentType(path.extname(filePath)); // コンテントタイプ
+                const ext = path.extname(filePath); // ファイル拡張子を取得
+                // テキストファイル（.js, .css, .html等）はUTF-8エンコーディングで読み込む
+                const isTextFile = ['.js', '.css', '.html', '.htm', '.txt', '.json', '.svg', '.xml'].includes(ext.toLowerCase());
+                let data;
+                if (isTextFile) {
+                  // テキストファイルはUTF-8で読み込んで、明示的にBufferに変換して送信
+                  const text = await fs.promises.readFile(filePath, "utf8");
+                  data = Buffer.from(text, "utf8");
+                } else {
+                  // バイナリファイルはそのまま読み込む
+                  data = await fs.promises.readFile(filePath);
+                }
+                const contentType = getContentType(ext); // コンテントタイプ
                 res.writeHead(200, { "Content-Type": contentType }); // コンテントタイプを設定
                 return res.end(data); // ファイルデータを送信
               } catch (e) { // ファイル読み込みエラーの場合
@@ -672,6 +684,38 @@ function startWebDAV(activeCacheDir) {
               logger.warn(`[404 Not Found] ${fullPath}`); // 404 Not Foundログ
               res.writeHead(404); // ステータスコードを404に設定
               return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
+            }
+
+            // 画像変換機能が無効の場合は元画像をそのまま返す
+            if (!getImageConversionEnabled()) {
+              logger.info(`[画像変換無効] 元画像をそのまま返します: ${fullPath}`);
+              const fileExt = path.extname(fullPath).toLowerCase();
+              let contentType = 'application/octet-stream';
+              if (fileExt === '.jpg' || fileExt === '.jpeg') contentType = 'image/jpeg';
+              else if (fileExt === '.png') contentType = 'image/png';
+              else if (fileExt === '.gif') contentType = 'image/gif';
+              else if (fileExt === '.webp') contentType = 'image/webp';
+              else if (fileExt === '.bmp') contentType = 'image/bmp';
+              else if (fileExt === '.tiff' || fileExt === '.tif') contentType = 'image/tiff';
+              else if (fileExt === '.avif') contentType = 'image/avif';
+              else if (fileExt === '.heic' || fileExt === '.heif') contentType = 'image/heic';
+
+              res.writeHead(200, {
+                "Content-Type": contentType,
+                "Content-Length": st.size,
+                "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+                Connection: "Keep-Alive",
+                "Keep-Alive": "timeout=600",
+              });
+
+              const fileStream = fs.createReadStream(fullPath);
+              fileStream.pipe(res);
+              fileStream.on("error", (err) => {
+                logger.error(`[元画像送信失敗] ${displayPath}: ${err.message}`);
+                if (!res.headersSent) res.writeHead(500);
+                res.end("Failed to read original image");
+              });
+              return;
             }
 
             // 画像サイズが1MB以上の場合のみキャッシュ

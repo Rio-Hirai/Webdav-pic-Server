@@ -310,6 +310,8 @@ function loadConfig() {
               logger.info(`[緊急リセット設定更新] リセット閾値が ${value} リクエストに変更されました`);
             } else if (key === 'EMERGENCY_RESET_WINDOW_MS') {
               logger.info(`[緊急リセット設定更新] リセット時間窓が ${value}ms に変更されました`);
+            } else if (key === 'IMAGE_CONVERSION_ENABLED') {
+              logger.info(`[画像変換設定更新] 画像変換機能が ${value === 'true' ? '有効' : '無効'} に変更されました`);
             }
               } else {
                 // 新規設定の追加
@@ -377,6 +379,11 @@ function getCompressionThreshold() {
   return parseFloat(process.env.COMPRESSION_THRESHOLD) || 0.3;
 }
 
+// 画像変換機能の有効/無効制御（動的設定対応）
+function getImageConversionEnabled() {
+  return getDynamicConfig('IMAGE_CONVERSION_ENABLED', true);
+}
+
 // 動的キャッシュ設定読み込み関数
 const getCacheMinSize = () => getDynamicConfig('CACHE_MIN_SIZE', 1 * 1024 * 1024); // 1MB - キャッシュ対象の最小ファイルサイズ
 const getCacheTTL = () => getDynamicConfig('CACHE_TTL_MS', 5 * 60 * 1000); // 5分 - キャッシュファイルの有効期間
@@ -431,6 +438,7 @@ module.exports = {
   loadConfig,
   getCompressionEnabled,
   getCompressionThreshold,
+  getImageConversionEnabled,
   getCacheMinSize,
   getCacheTTL,
   getMaxConcurrency,

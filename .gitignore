@@ -1,9 +1,11 @@
 node_modules
 *sub*
-*test*
+test_storage*
+
 .backup/
 server.log
 webdav-server.pid
 comp.py
 logs/
 pic/
+test_storage

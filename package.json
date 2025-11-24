@@ -1,6 +1,6 @@
 {
   "name": "webdav-pc-server",
-  "version": "24.7.0",
+  "version": "24.8.0",
   "main": "main.js",
   "engines": {
     "node": ">=25.0.0"

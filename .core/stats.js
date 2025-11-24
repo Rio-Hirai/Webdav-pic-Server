@@ -2,7 +2,7 @@
 // 画像変換/テキスト圧縮の削減量を非同期に集計し、設定UIから参照できるようにする。
 const fs = require("fs");
 const path = require("path");
-const { logger } = require("./config");
+const { logger, getImageConversionEnabled, getCompressionEnabled } = require("./config");
 
 const STATS_FILE = path.join(__dirname, "..", "logs", "stats.json");
 const WRITE_DEBOUNCE_MS = 2000;
@@ -211,6 +211,7 @@ function computeReductionRatio(original, optimized) {
  * 画像変換の転送結果を記録する。
  */
 function recordImageTransfer({ originalBytes, optimizedBytes, cacheHit }) {
+  if (!getImageConversionEnabled()) return;
   enqueue({
     category: "image",
     originalBytes,
@@ -223,6 +224,7 @@ function recordImageTransfer({ originalBytes, optimizedBytes, cacheHit }) {
  * テキスト/gzip圧縮の転送結果を記録する。
  */
 function recordTextCompression({ originalBytes, optimizedBytes }) {
+  if (!getCompressionEnabled()) return;
   enqueue({
     category: "text",
     originalBytes,

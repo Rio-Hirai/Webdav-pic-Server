@@ -708,6 +708,7 @@ function startWebDAV(activeCacheDir) {
             }
 
             const recordImageStats = (optimizedBytes, cacheHit = false) => {
+              if (!getImageConversionEnabled()) return;
               if (!st || typeof st.size !== "number" || st.size <= 0) return;
               const optimized =
                 typeof optimizedBytes === "number" && optimizedBytes >= 0

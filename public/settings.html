@@ -274,7 +274,7 @@
         <h2>通信量の削減状況</h2>
         <div class="stats-meta">
           <span id="statsUpdated" class="stats-meta-text">更新: --</span>
-          <button type="button" id="statsRefresh" class="btn-ghost btn-small">再読込</button>
+          <button type="button" id="statsRefresh" class="btn-ghost btn-small">更新</button>
         </div>
       </div>
       <div class="stats-summary">
@@ -322,10 +322,10 @@
     <div class="fixed-bar-inner">
       <button id="btnLoadFixed" class="btn-ghost" type="button">再読み込み</button>
       <button id="btnSaveFixed" class="btn-primary" type="button">保存</button>
-      <div class="status" id="statusFixed"></div>
       <button id="themeToggle" class="btn-ghost" type="button">ダーク</button>
     </div>
   </div>
+  <div class="status-popup-stack" id="statusPopupContainer" aria-live="polite" aria-atomic="true"></div>
 
   <script>
   // ==========================================
@@ -398,6 +398,7 @@
   // ヘルパー関数
     const byId = id => document.getElementById(id);
     const statusEl = byId('status');
+    const popupContainer = byId('statusPopupContainer');
     const rawEl = byId('raw');
     const themeBtn = byId('themeToggle');
     const statsEls = {
@@ -474,8 +475,57 @@
       }
     }
 
+    // メッセージ内容に応じた装飾情報を返す
+    function resolveStatusVisual(message, err){
+      const base = { className: '', title: 'お知らせ', icon: 'i' };
+      if (!message) return base;
+      if (err) return { className: 'is-error', title: 'エラー', icon: '!' };
+      if (/完了|成功|完了しました|保存が完了/.test(message)) {
+        return { className: 'is-success', title: '成功', icon: '✓' };
+      }
+      if (/中|実行|確認|読み込み/.test(message)) {
+        return { className: 'is-progress', title: '処理中', icon: '…' };
+      }
+      return base;
+    }
+
+    // ステータスメッセージをポップアップ表示する
+    function showStatusPopup(message, err){
+      try {
+        if (!popupContainer || !message) return;
+        const visual = resolveStatusVisual(message, err);
+        const item = document.createElement('div');
+        item.className = 'status-popup' + (visual.className ? ` ${visual.className}` : '');
+        item.setAttribute('role', 'status');
+        const icon = document.createElement('span');
+        icon.className = 'status-popup-icon';
+        icon.textContent = visual.icon;
+        const body = document.createElement('div');
+        body.className = 'status-popup-body';
+        const title = document.createElement('div');
+        title.className = 'status-popup-title';
+        title.textContent = visual.title;
+        const text = document.createElement('div');
+        text.className = 'status-popup-message';
+        text.textContent = message;
+        body.appendChild(title);
+        body.appendChild(text);
+        item.appendChild(icon);
+        item.appendChild(body);
+        popupContainer.appendChild(item);
+        requestAnimationFrame(() => item.classList.add('is-visible'));
+        setTimeout(() => {
+          item.classList.remove('is-visible');
+          setTimeout(() => {
+            try { item.remove(); } catch(e) {}
+          }, 220);
+        }, 2000);
+      } catch(e) {}
+    }
+
     function setStatus(msg, err) {
       try {
+        if (msg) showStatusPopup(msg, err);
         if (!statusEl) return;
         statusEl.textContent = msg || '';
         statusEl.style.color = err ? 'var(--danger)' : '';
@@ -492,8 +542,8 @@
       if (statsEls.requestCount) statsEls.requestCount.textContent = (totals.requests || 0).toLocaleString("ja-JP");
       if (statsEls.since) {
         statsEls.since.textContent = snapshot && snapshot.since
-          ? `起点: ${formatDateTime(snapshot.since)}`
-          : "起点: --";
+          ? `開始: ${formatDateTime(snapshot.since)}`
+          : "開始: --";
       }
       if (statsEls.updated) {
         statsEls.updated.textContent = snapshot && snapshot.lastUpdated
@@ -534,15 +584,20 @@
 
     async function loadStatsPanel(manual) {
       if (!statsEls.panel) return;
-      if (manual && statsEls.refreshBtn) statsEls.refreshBtn.disabled = true;
+      if (manual) {
+        if (statsEls.refreshBtn) statsEls.refreshBtn.disabled = true;
+        showStatusPopup('通信量の削減状況を再読込中...', false);
+      }
       try {
         const response = await fetch("/setting/stats");
         if (!response.ok) throw new Error("HTTP " + response.status);
         const snapshot = await response.json();
         renderStats(snapshot);
+        if (manual) showStatusPopup('通信量の削減状況を更新しました', false);
       } catch (err) {
         const msg = err && err.message ? err.message : "unknown";
         renderStatsError(msg);
+        if (manual) showStatusPopup('通信量の削減状況の取得に失敗しました: ' + msg, true);
       } finally {
         if (manual && statsEls.refreshBtn) statsEls.refreshBtn.disabled = false;
       }
@@ -939,7 +994,7 @@
   // サーバーから設定データを取得してフォームに反映する非同期関数
   // エンドポイント: GET /setting/data
   async function loadConfig() {
-      setStatus('Loading...');
+      setStatus('読み込み中...');
       try {
         const r = await fetch('/setting/data');
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -952,22 +1007,22 @@
         // 未保存チェック用のスナップショットを保存
         initialConfigText = buildConfigText();
         checkDirty();
-        setStatus('Loaded');
+        setStatus('読み込みが完了しました');
       } catch (e) {
-        setStatus('Load error: ' + (e.message || e), true);
+        setStatus('読み込みエラー: ' + (e.message || e), true);
       }
     }
 
   // フォームの値を組み立ててサーバに保存する非同期関数
   // エンドポイント: POST /setting/save
   async function saveConfig() {
-      setStatus('Validating...');
+      setStatus('入力内容を確認しています...');
       const v = validate();
       if (!v.ok) { setStatus(v.msg, true); return; }
       const text = buildConfigText();
   // 保存前に生データ（raw）プレビューを表示（プレビュー要素が存在する場合のみ）
       if (rawEl) rawEl.textContent = text;
-      setStatus('Saving...');
+      setStatus('保存処理を実行しています...');
       try {
         // Node.js 25.0.0最適化: JSON.stringifyの高速化を活用
         const r = await fetch('/setting/save', {
@@ -979,9 +1034,9 @@
         // スナップショットを更新し、次の変更まで保存を無効化
         initialConfigText = buildConfigText();
         setSaveEnabled(false);
-        setStatus('Saved');
+        setStatus('保存が完了しました');
       } catch (e) {
-        setStatus('Save error: ' + (e.message || e), true);
+        setStatus('保存エラー: ' + (e.message || e), true);
       }
     }
 
@@ -1356,22 +1411,11 @@
         }
       } catch(e) {}
 
-       // 固定バーボタンの配線（存在する場合）
+      // 固定バーボタンの配線（存在する場合）
       const btnSaveFixed = byId('btnSaveFixed');
       const btnLoadFixed = byId('btnLoadFixed');
-      const statusFixed = byId('statusFixed');
       if (btnSaveFixed) btnSaveFixed.addEventListener('click', () => saveConfig());
       if (btnLoadFixed) btnLoadFixed.addEventListener('click', () => loadConfig());
-      // ステータスを同期
-      const origSetStatus = setStatus;
-      setStatus = (msg, err) => {
-        try {
-          origSetStatus(msg, err);
-        } catch(e) {}
-        try {
-          if (statusFixed) statusFixed.textContent = msg || '';
-        } catch(e) {}
-      };
 
       // チェックボックス行をアクセシブルな視覚的トグルスイッチに変換
       try {

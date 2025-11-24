@@ -2,7 +2,7 @@
 /* CSS カスタムプロパティ（CSS変数）の定義
    - テーマ対応の色設定を一元管理
    - ライト/ダークテーマの切り替えに対応 */
-:root{--bg:#f7f8fa;--card:#fff;--accent:#007acc;--muted:#6c757d;--danger:#d9534f;--text:#222;--pre-bg:#0f1720;--pre-color:#e6eef6;--input-border:#ddd;--ghost-bg:#eee;--stat-bg:rgba(0,0,0,0.02)}
+:root{--bg:#f7f8fa;--card:#fff;--accent:#007acc;--muted:#6c757d;--danger:#d9534f;--success:#1fad55;--info:#0d6efd;--text:#222;--pre-bg:#0f1720;--pre-color:#e6eef6;--input-border:#ddd;--ghost-bg:#eee;--stat-bg:rgba(0,0,0,0.02)}
 /* トグル/スイッチの色変数: テーマ対応トークンを使用 */
 /* カスタムトグルスイッチの色設定
    - オフ状態: ゴースト背景色を使用
@@ -126,6 +126,21 @@ button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-r
    - 小さなフォントで控えめに表示
    - ミュート色で重要度を下げる */
 .status{margin-left:6px;font-size:13px;color:var(--muted)}
+/* ステータスポップアップのスタックコンテナ */
+.status-popup-stack{position:fixed;right:24px;top:24px;display:flex;flex-direction:column;gap:8px;z-index:120;pointer-events:none}
+/* ポップアップ本体 */
+.status-popup{min-width:240px;max-width:360px;padding:14px 16px;border-radius:10px;background:var(--card);color:var(--text);box-shadow:0 10px 28px rgba(0,0,0,0.18);opacity:0;transform:translateY(12px);transition:opacity 200ms ease,transform 200ms ease;border-left:4px solid var(--accent);display:flex;gap:12px;align-items:flex-start;}
+.status-popup-icon{width:36px;height:36px;border-radius:999px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;flex-shrink:0;}
+.status-popup-body{display:flex;flex-direction:column;gap:2px;}
+.status-popup-title{font-size:13px;font-weight:600;color:var(--muted);}
+.status-popup-message{font-size:14px;line-height:1.4;}
+.status-popup.is-success{border-left-color:var(--success);}
+.status-popup.is-success .status-popup-icon{background:var(--success);}
+.status-popup.is-error{border-left-color:var(--danger);}
+.status-popup.is-error .status-popup-icon{background:var(--danger);}
+.status-popup.is-progress{border-left-color:var(--info);}
+.status-popup.is-progress .status-popup-icon{background:var(--info);}
+.status-popup.is-visible{opacity:1;transform:translateY(0);}
 /* 可読性とアクセシビリティのための改善された pre/code スタイル */
 /* コードブロックのスタイル
    - ダークテーマ対応の背景色とテキスト色
@@ -305,6 +320,8 @@ hr { margin: 12px 0; }
 	--accent:#4da3ff;
 	--muted:#9fb3bf; /* 可読性のため、少し明るいミュート色 */
 	--danger:#ff6b6b;
+	--success:#38d379;
+	--info:#5fb0ff;
 	/* テーマテキスト色: ダーク背景で明るく */
 	--text:#e6eef6;
 	/* ダークテーマで良いコントラストを保つため、pre の背景とテキストを調整 */
@@ -358,7 +375,6 @@ body, .card, pre { transition: background-color 220ms ease, color 220ms ease, bo
 .fixed-bar .btn-primary{background:var(--accent);color:#fff;border:none;padding:12px 16px;border-radius:6px}
 .fixed-bar .btn-ghost{background:var(--ghost-bg);color:var(--text);border:1px solid transparent;padding:12px 16px}
 /* 固定バー内のステータス表示 */
-.fixed-bar .status{margin-left:10px;color:var(--muted)}
 
 /* テーマトグルを固定バーの右端にピン留め */
 /* テーマ切り替えボタンの配置
@@ -384,6 +400,8 @@ body, .card, pre { transition: background-color 220ms ease, color 220ms ease, bo
 @media(max-width:600px){
   .stat-value{font-size:24px}
   .stats-table th,.stats-table td{font-size:13px}
+  .status-popup-stack{left:0;right:0;padding:0 12px;align-items:center;top:12px}
+  .status-popup{width:100%;max-width:480px}
 }
 
 /* モバイル向け固定バーの最適化 */

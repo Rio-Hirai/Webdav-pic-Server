@@ -28,6 +28,7 @@ const {
   getWebpEffortFast, // WebPの高速エンコード努力度
   getWebpPreset, // WebPのプリセット
   getWebpReductionEffort, // WebPの再圧縮努力度
+  getImageConversionEnabled, // 画像変換機能フラグ
 } = require("./config"); // 設定値を取得
 const { recordImageTransfer } = require("./stats"); // 転送統計
 
@@ -1603,6 +1604,9 @@ startInFlightMonitoring();
  * @param {number} originalBytes 元画像サイズ
  */
 function createStatsRecorder(originalBytes) {
+  if (!getImageConversionEnabled()) {
+    return { record: () => {} };
+  }
   const normalizedOriginal = Number(originalBytes);
   if (!Number.isFinite(normalizedOriginal) || normalizedOriginal <= 0) {
     return { record: () => {} };

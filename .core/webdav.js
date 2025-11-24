@@ -30,6 +30,11 @@ const {
 
 // 画像変換モジュール
 const { convertAndRespond, convertAndRespondWithLimit } = require("./image"); // 画像変換モジュール
+const {
+  recordImageTransfer,
+  recordTextCompression,
+  getStatsSnapshot,
+} = require("./stats");
 
 const PassThrough = stream.PassThrough; // ストリーム処理 - PassThrough、pipeline等のストリーム操作、メモリ効率化
 const pipeline = promisify(stream.pipeline); // ストリーム処理 - PassThrough、pipeline等のストリーム操作、メモリ効率化
@@ -523,6 +528,22 @@ function startWebDAV(activeCacheDir) {
               }
             }
 
+            // GET /setting/stats -> 統計情報
+            if (
+              req.method === "GET" &&
+              (urlPath === "/setting/stats" || urlPath === "/setting/stats/")
+            ) {
+              try {
+                const snapshot = getStatsSnapshot();
+                res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+                return res.end(JSON.stringify(snapshot));
+              } catch (e) {
+                logger.warn("[stats endpoint error]", e);
+                res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+                return res.end(JSON.stringify({ error: "stats_error" }));
+              }
+            }
+
             // public/settings.htmlからメインUIを提供
             if (
               req.method === "GET" && // GETメソッドの場合
@@ -686,6 +707,21 @@ function startWebDAV(activeCacheDir) {
               return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
             }
 
+            const recordImageStats = (optimizedBytes, cacheHit = false) => {
+              if (!st || typeof st.size !== "number" || st.size <= 0) return;
+              const optimized =
+                typeof optimizedBytes === "number" && optimizedBytes >= 0
+                  ? optimizedBytes
+                  : st.size;
+              try {
+                recordImageTransfer({
+                  originalBytes: st.size,
+                  optimizedBytes: optimized,
+                  cacheHit,
+                });
+              } catch (_) {}
+            };
+
             // 画像変換機能が無効の場合は元画像をそのまま返す
             if (!getImageConversionEnabled()) {
               logger.info(`[画像変換無効] 元画像をそのまま返します: ${fullPath}`);
@@ -715,6 +751,7 @@ function startWebDAV(activeCacheDir) {
                 if (!res.headersSent) res.writeHead(500);
                 res.end("Failed to read original image");
               });
+              fileStream.on("end", () => recordImageStats(st.size, false));
               return;
             }
 
@@ -773,12 +810,19 @@ function startWebDAV(activeCacheDir) {
                   res.writeHead(200, headers); // ステータスコードを200に設定してヘッダーを送信
                   try {
                     const s = fs.createReadStream(cachePath);
+                    let recorded = false;
+                    const recordOnce = () => {
+                      if (recorded) return;
+                      recorded = true;
+                      recordImageStats(cst.size, true);
+                    };
                     const onErr = (e) => {
                       logger.warn("[cache stream error]", e);
                       try { if (!res.headersSent) res.writeHead(500); } catch(_) {}
                       try { res.end("Internal error"); } catch(_) {}
                     };
                     s.on('error', onErr);
+                    s.on('end', recordOnce);
                     res.on('close', () => { try { s.destroy(); } catch(_) {} });
                     return s.pipe(res);
                   } catch (e) {
@@ -802,6 +846,7 @@ function startWebDAV(activeCacheDir) {
                 Photo_Size: getPhotoSize(), // 写真サイズ
                 res, // レスポンス
                 clientIP, // クライアントIP
+                originalSize: st.size,
               }); // 画像変換を実行
             } catch (e) {
               logger.warn("[convert error]", e);
@@ -963,6 +1008,12 @@ function startWebDAV(activeCacheDir) {
                       res.setHeader("Content-Encoding", "gzip"); // コンテントエンコーディングをgzipに設定
                       res.setHeader("Content-Length", compressed.length); // コンテント長を設定
                       logger.info(`[圧縮適用] ${displayPath} サイズ: ${fullData.length} → ${compressed.length} bytes (圧縮率: ${(compressionRatio * 100).toFixed(1)}%)`); // 圧縮適用ログ
+                      try {
+                        recordTextCompression({
+                          originalBytes: fullData.length,
+                          optimizedBytes: compressed.length,
+                        });
+                      } catch (_) {}
                       originalEnd.call(this, compressed); // レスポンスのendメソッドを呼び出す
                     } else { // 圧縮率が閾値以上の場合
                       logger.info(`[圧縮スキップ] ${displayPath} - 圧縮効果が不十分: ${(compressionRatio * 100).toFixed(1)}% >= ${(threshold * 100).toFixed(1)}%`); // 圧縮スキップログ
@@ -1047,6 +1098,12 @@ function startWebDAV(activeCacheDir) {
                       Vary: "Accept-Encoding", // Varyヘッダー
                     });
                     res.end(compressed); // 圧縮後データを送信
+                    try {
+                      recordTextCompression({
+                        originalBytes: fileData.length,
+                        optimizedBytes: compressed.length,
+                      });
+                    } catch (_) {}
                     logger.info(`[ファイル圧縮完了] ${displayPath} サイズ: ${fileData.length} → ${compressed.length} bytes (圧縮率: ${(compressionRatio * 100).toFixed(1)}%)`); // 圧縮完了ログ
                     return; // 圧縮レスポンスを送信して処理終了
                   }

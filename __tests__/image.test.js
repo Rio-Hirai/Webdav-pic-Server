@@ -66,6 +66,7 @@ describe("Image Conversion (画像変換)", () => {
       quality: 80,
       Photo_Size: 500,
       res: mockRes,
+      originalSize: 1024,
     };
     // 関数をトリガー
     const promise = image.convertAndRespond(params);
@@ -114,6 +115,7 @@ describe("Image Conversion (画像変換)", () => {
       quality: 80,
       Photo_Size: 500,
       res: mockRes,
+      originalSize: 2048,
     };
 
     image.convertAndRespond(params);

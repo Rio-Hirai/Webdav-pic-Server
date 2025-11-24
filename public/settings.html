@@ -269,6 +269,45 @@
       </div>
       -->
     </div>
+    <section class="card full-width stats-card" id="statsPanel" aria-live="polite">
+      <div class="stats-header">
+        <h2>通信量の削減状況</h2>
+        <div class="stats-meta">
+          <span id="statsUpdated" class="stats-meta-text">更新: --</span>
+          <button type="button" id="statsRefresh" class="btn-ghost btn-small">再読込</button>
+        </div>
+      </div>
+      <div class="stats-summary">
+        <div class="stat-box">
+          <div class="stat-label">累計削減量</div>
+          <div class="stat-value" id="statsSavedBytes">--</div>
+          <div class="stat-sub" id="statsSavedPercent">--</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">累計処理件数</div>
+          <div class="stat-value" id="statsRequestCount">--</div>
+          <div class="stat-sub" id="statsSince">起点: --</div>
+        </div>
+      </div>
+      <div class="stats-table-wrapper">
+        <table class="stats-table">
+          <thead>
+            <tr>
+              <th scope="col">カテゴリ</th>
+              <th scope="col">件数</th>
+              <th scope="col">削減量</th>
+              <th scope="col">削減率</th>
+              <th scope="col">備考</th>
+            </tr>
+          </thead>
+          <tbody id="statsCategoryBody">
+            <tr>
+              <td colspan="5" class="stats-empty">読み込み中...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
   <!-- 固定表示される保存バー -->
@@ -361,8 +400,19 @@
     const statusEl = byId('status');
     const rawEl = byId('raw');
     const themeBtn = byId('themeToggle');
+    const statsEls = {
+      panel: document.getElementById('statsPanel'),
+      refreshBtn: document.getElementById('statsRefresh'),
+      savedBytes: document.getElementById('statsSavedBytes'),
+      savedPercent: document.getElementById('statsSavedPercent'),
+      requestCount: document.getElementById('statsRequestCount'),
+      since: document.getElementById('statsSince'),
+      updated: document.getElementById('statsUpdated'),
+      tbody: document.getElementById('statsCategoryBody')
+    };
   // 未保存検出のための初期スナップショット
   let initialConfigText = null;
+    let statsIntervalId = null;
 
   // テーマ切替ヘルパー（ライト/ダーク）
     function applyTheme(theme){
@@ -389,6 +439,41 @@
       }catch(e){}
     }
 
+    const statsCategoryLabels = {
+      image: "画像変換",
+      text: "テキスト圧縮"
+    };
+
+    function formatBytesHuman(bytes){
+      const num = Number(bytes);
+      if (!Number.isFinite(num) || num <= 0) return "0 B";
+      const units = ["B","KB","MB","GB","TB"];
+      let value = num;
+      let unitIndex = 0;
+      while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex++;
+      }
+      const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+      return `${value.toFixed(digits)} ${units[unitIndex]}`;
+    }
+
+    function formatPercentFromRatio(ratio){
+      const num = Number(ratio);
+      if (!Number.isFinite(num) || num <= 0) return "0%";
+      const value = num * 100;
+      return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+    }
+
+    function formatDateTime(isoString){
+      if (!isoString) return "--";
+      try {
+        return new Date(isoString).toLocaleString("ja-JP", { hour12: false });
+      } catch(e) {
+        return isoString;
+      }
+    }
+
     function setStatus(msg, err) {
       try {
         if (!statusEl) return;
@@ -397,6 +482,80 @@
       } catch(e) {
         // ステータス要素が存在しない場合の DOM 書き込みエラーを無視
       }
+    }
+
+    function renderStats(snapshot) {
+      if (!statsEls.panel) return;
+      const totals = snapshot && snapshot.totals ? snapshot.totals : {};
+      if (statsEls.savedBytes) statsEls.savedBytes.textContent = formatBytesHuman(totals.savedBytes);
+      if (statsEls.savedPercent) statsEls.savedPercent.textContent = formatPercentFromRatio(totals.reductionRatio);
+      if (statsEls.requestCount) statsEls.requestCount.textContent = (totals.requests || 0).toLocaleString("ja-JP");
+      if (statsEls.since) {
+        statsEls.since.textContent = snapshot && snapshot.since
+          ? `起点: ${formatDateTime(snapshot.since)}`
+          : "起点: --";
+      }
+      if (statsEls.updated) {
+        statsEls.updated.textContent = snapshot && snapshot.lastUpdated
+          ? `更新: ${formatDateTime(snapshot.lastUpdated)}`
+          : "更新: --";
+      }
+      if (statsEls.tbody) {
+        statsEls.tbody.innerHTML = buildStatsRows(snapshot && snapshot.categories);
+      }
+    }
+
+    function renderStatsError(message) {
+      if (!statsEls.panel || !statsEls.tbody) return;
+      statsEls.savedBytes && (statsEls.savedBytes.textContent = "--");
+      statsEls.savedPercent && (statsEls.savedPercent.textContent = "--");
+      statsEls.requestCount && (statsEls.requestCount.textContent = "--");
+      statsEls.updated && (statsEls.updated.textContent = "更新: エラー");
+      statsEls.tbody.innerHTML = `<tr><td colspan="5" class="stats-empty">取得できませんでした (${message})</td></tr>`;
+    }
+
+    function buildStatsRows(categories) {
+      const entries = Object.entries(categories || {});
+      if (!entries.length) {
+        return "<tr><td colspan=\"5\" class=\"stats-empty\">まだデータがありません</td></tr>";
+      }
+      return entries.map(([key, data]) => {
+        const label = statsCategoryLabels[key] || key;
+        const requests = (data && data.requests ? data.requests : 0).toLocaleString("ja-JP");
+        const saved = formatBytesHuman(data && data.savedBytes);
+        const percent = formatPercentFromRatio(data && data.reductionRatio);
+        const memoParts = [];
+        if (data && data.cacheHits) memoParts.push(`キャッシュ ${data.cacheHits.toLocaleString("ja-JP")}件`);
+        if (data && data.maxSavedBytes) memoParts.push(`最大 ${formatBytesHuman(data.maxSavedBytes)}`);
+        const memo = memoParts.length ? memoParts.join(" / ") : "—";
+        return `<tr><th scope="row">${label}</th><td>${requests}</td><td>${saved}</td><td>${percent}</td><td>${memo}</td></tr>`;
+      }).join("");
+    }
+
+    async function loadStatsPanel(manual) {
+      if (!statsEls.panel) return;
+      if (manual && statsEls.refreshBtn) statsEls.refreshBtn.disabled = true;
+      try {
+        const response = await fetch("/setting/stats");
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const snapshot = await response.json();
+        renderStats(snapshot);
+      } catch (err) {
+        const msg = err && err.message ? err.message : "unknown";
+        renderStatsError(msg);
+      } finally {
+        if (manual && statsEls.refreshBtn) statsEls.refreshBtn.disabled = false;
+      }
+    }
+
+    function initStatsPanel() {
+      if (!statsEls.panel) return;
+      loadStatsPanel(true);
+      if (statsEls.refreshBtn) {
+        statsEls.refreshBtn.addEventListener("click", () => loadStatsPanel(true));
+      }
+      if (statsIntervalId) clearInterval(statsIntervalId);
+      statsIntervalId = setInterval(loadStatsPanel, 15000);
     }
 
   // config.txt の内容を解析して { KEY: value } 形式のオブジェクトを返す
@@ -849,6 +1008,7 @@
       }
       loadConfig();
       loadTheme();
+      initStatsPanel();
       
       // システム情報を取得して並列数上限を動的に設定
       (async () => {

@@ -29,6 +29,7 @@ const {
   getWebpPreset, // WebPのプリセット
   getWebpReductionEffort, // WebPの再圧縮努力度
 } = require("./config"); // 設定値を取得
+const { recordImageTransfer } = require("./stats"); // 転送統計
 
 const PassThrough = stream.PassThrough; // パススルー
 const pipeline = promisify(stream.pipeline); // パイプライン
@@ -152,7 +153,9 @@ async function convertAndRespond({
   Photo_Size,
   res,
   clientIP,
+  originalSize,
 }) {
+  const statsRecorder = createStatsRecorder(originalSize);
   // 画像処理モードを取得（1=高速処理、2=バランス処理、3=高圧縮処理）
   const imageMode = getImageMode();
   const isFast = imageMode === 1; // 高速処理モードかどうかを判定
@@ -171,6 +174,7 @@ async function convertAndRespond({
       Photo_Size,
       res,
       clientIP,
+      originalSize,
     });
   }
 
@@ -436,6 +440,7 @@ async function convertAndRespond({
 
           fileStream.on("end", () => {
             logger.info(`[変換完了(元画像)] ${displayPath}`);
+            statsRecorder.record(originalSize);
             res.end();
             return resolve();
           });
@@ -521,6 +526,7 @@ async function convertAndRespond({
 
               fileStream.on("end", () => {
                 logger.info(`[変換完了(元画像)] ${displayPath}`);
+                statsRecorder.record(originalSize);
                 res.end();
                 return resolve();
               });
@@ -624,6 +630,7 @@ async function convertAndRespond({
 
                 fileStream.on("end", () => {
                   logger.info(`[変換完了(元画像)] ${displayPath}`);
+                  statsRecorder.record(originalSize);
                   res.end();
                   return resolve();
                 });
@@ -687,6 +694,7 @@ async function convertAndRespond({
 
               fileStream.on("end", () => {
                 logger.info(`[変換完了(元画像)] ${displayPath}`);
+                statsRecorder.record(originalSize);
                 res.end();
                 return resolve();
               });
@@ -703,6 +711,7 @@ async function convertAndRespond({
           logger.info(
             `[変換完了(ImageMagick)] ${displayPath} (サイズ: ${magickResponseSize.toLocaleString()} bytes)`
           ); // ImageMagick変換完了ログを出力
+          statsRecorder.record(magickResponseSize);
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
         });
@@ -846,6 +855,7 @@ async function convertAndRespond({
           logger.info(
             `[変換完了(Sharp)] ${displayPath} (サイズ: ${responseSize.toLocaleString()} bytes)`
           ); // Sharp変換完了ログを出力
+          statsRecorder.record(responseSize);
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
         });
@@ -887,6 +897,7 @@ async function convertAndRespond({
           logger.info(
             `[変換完了(Sharp)] ${fullPath} (サイズ: ${responseSize.toLocaleString()} bytes)`
           ); // Sharp変換完了ログを出力
+          statsRecorder.record(responseSize);
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
         });
@@ -1036,6 +1047,7 @@ async function convertAndRespond({
         logger.info(
           `[変換完了(ImageMagick)] ${displayPath} (サイズ: ${initErrorResponseSize.toLocaleString()} bytes)`
         ); // ImageMagick変換完了ログを出力
+        statsRecorder.record(initErrorResponseSize);
         res.end(); // レスポンス終了
         return resolve(); // 成功
       });
@@ -1090,8 +1102,10 @@ async function convertHeicWithImageMagick({
   Photo_Size,
   res,
   clientIP,
+  originalSize,
 }) {
   return new Promise(async (resolve, reject) => {
+    const statsRecorder = createStatsRecorder(originalSize);
     // 画像処理モードを取得（Sharpと同じ設定を使用）
     const imageMode = getImageMode();
     const isFast = imageMode === 1; // 高速処理モードかどうかを判定
@@ -1267,6 +1281,7 @@ async function convertHeicWithImageMagick({
 
       fileStream.on("end", () => {
         logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+        statsRecorder.record(originalSize);
         res.end();
         return resolve();
       });
@@ -1340,6 +1355,7 @@ async function convertHeicWithImageMagick({
 
           fileStream.on("end", () => {
             logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+            statsRecorder.record(originalSize);
             res.end();
             return resolve();
           });
@@ -1431,6 +1447,7 @@ async function convertHeicWithImageMagick({
 
             fileStream.on("end", () => {
               logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+              statsRecorder.record(originalSize);
               res.end();
               return resolve();
             });
@@ -1482,6 +1499,7 @@ async function convertHeicWithImageMagick({
 
           fileStream.on("end", () => {
             logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+            statsRecorder.record(originalSize);
             res.end();
             return resolve();
           });
@@ -1510,6 +1528,7 @@ async function convertHeicWithImageMagick({
       logger.info(
         `[HEIC変換完了(ImageMagick)] ${displayPath} (サイズ: ${heicResponseSize.toLocaleString()} bytes, チャンク数: ${chunkCount}, 圧縮率: ${compressionRatio}%, 設定: q=${quality}, effort=${effortVal}, preset=${presetVal})`
       );
+      statsRecorder.record(heicResponseSize);
       res.end(); // レスポンスを終了
       return resolve(); // 呼び出し元に完了を伝播
     });
@@ -1578,6 +1597,33 @@ function stopInFlightMonitoring() {
 
 // in-flight監視を開始
 startInFlightMonitoring();
+
+/**
+ * 転送完了時に一度だけ統計へ記録するヘルパー。
+ * @param {number} originalBytes 元画像サイズ
+ */
+function createStatsRecorder(originalBytes) {
+  const normalizedOriginal = Number(originalBytes);
+  if (!Number.isFinite(normalizedOriginal) || normalizedOriginal <= 0) {
+    return { record: () => {} };
+  }
+  let recorded = false;
+  return {
+    record(optimizedBytes) {
+      if (recorded) return;
+      recorded = true;
+      const normalizedOptimized = Number(optimizedBytes);
+      recordImageTransfer({
+        originalBytes: normalizedOriginal,
+        optimizedBytes:
+          Number.isFinite(normalizedOptimized) && normalizedOptimized >= 0
+            ? normalizedOptimized
+            : normalizedOriginal,
+        cacheHit: false,
+      });
+    },
+  };
+}
 
 module.exports = {
   convertAndRespond,

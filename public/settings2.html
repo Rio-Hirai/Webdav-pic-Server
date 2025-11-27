@@ -1,0 +1,1567 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>⚙️ WebDAV Pic Server - Settings</title>
+    <link rel="stylesheet" href="/setting/css/settings2.css" />
+    <!-- favicons: add both /icons and /setting/icons paths to match server static routing -->
+    <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/setting/icons/favicon.svg" />
+    <link rel="shortcut icon" href="/setting/icons/favicon.svg" />
+    <!-- fallback (webp/png) if available -->
+    <link rel="alternate icon" type="image/png" href="/icons/favicon-256.png" />
+    <link rel="alternate icon" type="image/png" href="/setting/icons/favicon-256.png" />
+    <link rel="alternate icon" type="image/webp" href="/icons/favicon-256.webp" />
+    <link rel="alternate icon" type="image/webp" href="/setting/icons/favicon-256.webp" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="page-header">
+        <h1>WebDAV Pic Server</h1>
+        <p class="page-subtitle">設定画面</p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <form id="settingsForm" autocomplete="off">
+            <div class="field-group">
+              <h2 class="field-group-title">
+                <span class="field-group-icon">🖼️</span>
+                画像変換設定
+              </h2>
+              <div class="row checkbox-row">
+                <label for="IMAGE_CONVERSION_ENABLED">画像変換機能を有効にする</label>
+                <input type="checkbox" id="IMAGE_CONVERSION_ENABLED" name="IMAGE_CONVERSION_ENABLED" />
+              </div>
+              <div class="row" id="image-template-row">
+                <label for="IMAGE_TEMPLATE">テンプレート</label>
+                <select id="IMAGE_TEMPLATE" name="IMAGE_TEMPLATE">
+                  <option value="">未選択</option>
+                  <option value="hq">0 - 元画質</option>
+                  <option value="smallest">1 - 最低画質</option>
+                  <option value="small">2 - 低画質</option>
+                  <option value="medium">3 - 中画質</option>
+                  <option value="large">4 - 高画質</option>
+                </select>
+              </div>
+              <div class="row child" id="photo-size-row">
+                <label for="PHOTO_SIZE">最大画像サイズ (px)</label>
+                <div class="field-control">
+                  <input id="PHOTO_SIZE" name="PHOTO_SIZE" type="range" step="16" min="320" max="2400" />
+                  <output id="PHOTO_SIZE_VAL" for="PHOTO_SIZE">1080</output>
+                </div>
+              </div>
+              <div class="row child" id="default-quality-row">
+                <label for="DEFAULT_QUALITY">品質（1 〜 100）</label>
+                <div class="field-control">
+                  <input id="DEFAULT_QUALITY" name="DEFAULT_QUALITY" type="range" step="1" min="1" max="100" />
+                  <output id="DEFAULT_QUALITY_VAL" for="DEFAULT_QUALITY">50</output>
+                </div>
+              </div>
+              <div class="row child" id="image-mode-row">
+                <label for="IMAGE_MODE">画像処理モード</label>
+                <select id="IMAGE_MODE" name="IMAGE_MODE">
+                  <option value="1">1 - 高速（低負荷）</option>
+                  <option value="2">2 - バランス</option>
+                  <option value="3">3 - 高圧縮（高負荷）</option>
+                </select>
+              </div>
+              <div class="row child" id="webp-effort-row">
+                <label for="WEBP_EFFORT">圧縮努力 (0=最速 ... 6=最高圧縮)</label>
+                <div class="field-control">
+                  <input id="WEBP_EFFORT" name="WEBP_EFFORT" type="range" step="1" min="0" max="6" />
+                  <output id="WEBP_EFFORT_VAL" for="WEBP_EFFORT">1</output>
+                </div>
+              </div>
+              <div class="row child" id="webp-effort-fast-row">
+                <label for="WEBP_EFFORT_FAST">圧縮努力 (高速モード用)</label>
+                <div class="field-control">
+                  <input id="WEBP_EFFORT_FAST" name="WEBP_EFFORT_FAST" type="range" step="1" min="0" max="2" />
+                  <output id="WEBP_EFFORT_FAST_VAL" for="WEBP_EFFORT_FAST">0</output>
+                </div>
+              </div>
+              <div class="row child checkbox-row" id="webp-detailed-enabled-row">
+                <label for="WEBP_DETAILED_ENABLED">詳細設定</label>
+                <input type="checkbox" id="WEBP_DETAILED_ENABLED" name="WEBP_DETAILED_ENABLED" />
+              </div>
+              <div class="row child" id="webp-detailed-preset-row">
+                <label for="WEBP_PRESET">プリセット</label>
+                <select id="WEBP_PRESET" name="WEBP_PRESET">
+                  <option value="default">default - 標準</option>
+                  <option value="picture">picture - 写真向け</option>
+                  <option value="photo">photo - 高品質写真</option>
+                  <option value="drawing">drawing - 図面・イラスト</option>
+                  <option value="icon">icon - アイコン</option>
+                  <option value="text">text - テキスト</option>
+                </select>
+              </div>
+              <div class="row child" id="webp-detailed-reduction-row">
+                <label for="WEBP_REDUCTION_EFFORT">削減努力 (0=無効 ... 6=最大)</label>
+                <div class="field-control">
+                  <input id="WEBP_REDUCTION_EFFORT" name="WEBP_REDUCTION_EFFORT" type="range" step="1" min="0" max="6" />
+                  <output id="WEBP_REDUCTION_EFFORT_VAL" for="WEBP_REDUCTION_EFFORT">0</output>
+                </div>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <h2 class="field-group-title">
+                <span class="field-group-icon">🗜️</span>
+                レスポンス圧縮設定
+              </h2>
+              <div class="row checkbox-row">
+                <label for="COMPRESSION_ENABLED">gzip 圧縮を有効にする</label>
+                <input id="COMPRESSION_ENABLED" name="COMPRESSION_ENABLED" type="checkbox" />
+              </div>
+              <div class="row">
+                <label for="COMPRESSION_THRESHOLD">圧縮閾値 (0.00 〜 1.00)</label>
+                <div class="field-control">
+                  <input id="COMPRESSION_THRESHOLD" name="COMPRESSION_THRESHOLD" type="range" step="0.01" min="0" max="1" />
+                  <output id="COMPRESSION_THRESHOLD_VAL" for="COMPRESSION_THRESHOLD">0.00</output>
+                </div>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <h2 class="field-group-title">
+                <span class="field-group-icon">💾</span>
+                キャッシュ / メモリ
+              </h2>
+              <div class="row">
+                <label for="CACHE_TTL_MS">キャッシュ有効期限 (秒)</label>
+                <input id="CACHE_TTL_MS" name="CACHE_TTL_MS" type="number" min="0" inputmode="numeric" title="数値を入力してください" />
+              </div>
+              <div class="row">
+                <label for="CACHE_MIN_SIZE">キャッシュ対象の最小サイズ (KB)</label>
+                <input id="CACHE_MIN_SIZE" name="CACHE_MIN_SIZE" type="number" min="0" inputmode="numeric" title="数値を入力してください (KB)" />
+              </div>
+              <div class="row">
+                <label for="MAX_CONCURRENCY">同時処理数の上限（1 〜 32）</label>
+                <div class="field-control">
+                  <input id="MAX_CONCURRENCY" name="MAX_CONCURRENCY" type="range" step="1" min="1" max="32" />
+                  <output id="MAX_CONCURRENCY_VAL" for="MAX_CONCURRENCY">4</output>
+                </div>
+              </div>
+              <div class="row">
+                <label for="SHARP_MEMORY_LIMIT">メモリ使用量の上限 (128 〜 8192 MB)</label>
+                <div class="field-control">
+                  <input id="SHARP_MEMORY_LIMIT" name="SHARP_MEMORY_LIMIT" type="range" step="1" min="128" max="8192" />
+                  <output id="SHARP_MEMORY_LIMIT_VAL" for="SHARP_MEMORY_LIMIT">512</output>
+                </div>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <h2 class="field-group-title">
+                <span class="field-group-icon">⚙️</span>
+                サーバー設定
+              </h2>
+              <div class="row">
+                <label for="PORT">待ち受けポート番号</label>
+                <input id="PORT" name="PORT" type="number" min="1" max="65535" inputmode="numeric" title="1〜65535 の整数を入力してください" />
+              </div>
+              <div class="row">
+                <label for="ROOT_PATH">ルートパス</label>
+                <input id="ROOT_PATH" name="ROOT_PATH" type="text" />
+              </div>
+              <div class="row">
+                <label for="MAX_LIST">ディレクトリ一覧の最大件数</label>
+                <input id="MAX_LIST" name="MAX_LIST" type="number" min="1" inputmode="numeric" title="1 以上の整数を入力してください" />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <h2 class="field-group-title">
+                <span class="field-group-icon">🚦</span>
+                レート制限
+              </h2>
+              <div class="row checkbox-row">
+                <label for="RATE_LIMIT_ENABLED">レート制限を有効にする</label>
+                <input id="RATE_LIMIT_ENABLED" name="RATE_LIMIT_ENABLED" type="checkbox" />
+              </div>
+              <div class="row">
+                <label for="RATE_LIMIT_REQUESTS">許可リクエスト数</label>
+                <input id="RATE_LIMIT_REQUESTS" name="RATE_LIMIT_REQUESTS" type="number" min="0" inputmode="numeric" title="数値を入力してください" />
+              </div>
+              <div class="row">
+                <label for="RATE_LIMIT_WINDOW_MS">リクエスト生存時間 (秒)</label>
+                <input id="RATE_LIMIT_WINDOW_MS" name="RATE_LIMIT_WINDOW_MS" type="number" min="0" inputmode="numeric" title="数値を入力してください (秒)" />
+              </div>
+              <div class="row">
+                <label for="RATE_LIMIT_QUEUE_SIZE">レート制限キューサイズ</label>
+                <input id="RATE_LIMIT_QUEUE_SIZE" name="RATE_LIMIT_QUEUE_SIZE" type="number" min="0" inputmode="numeric" title="数値を入力してください" />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <h2 class="field-group-title">
+                <span class="field-group-icon">🚨</span>
+                緊急 / スタック / 再起動
+              </h2>
+              <div class="row checkbox-row">
+                <label for="EMERGENCY_DISABLE_RATE_LIMIT">緊急時にレート制限を無効化する</label>
+                <input id="EMERGENCY_DISABLE_RATE_LIMIT" name="EMERGENCY_DISABLE_RATE_LIMIT" type="checkbox" />
+              </div>
+              <div class="row">
+                <label for="STACK_MAX_SIZE">スタック最大サイズ</label>
+                <input id="STACK_MAX_SIZE" name="STACK_MAX_SIZE" type="number" min="1" inputmode="numeric" title="1 以上の整数を入力してください" />
+              </div>
+              <div class="row">
+                <label for="STACK_PROCESSING_DELAY_MS">スタック処理遅延 (ms)</label>
+                <input id="STACK_PROCESSING_DELAY_MS" name="STACK_PROCESSING_DELAY_MS" type="number" min="0" inputmode="numeric" title="数値を入力してください (ms)" />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <h2 class="field-group-title">
+                <span class="field-group-icon">🔧</span>
+                その他
+              </h2>
+              <div class="row">
+                <label for="MAGICK_PATH">ImageMagick コマンド / パス</label>
+                <input id="MAGICK_PATH" name="MAGICK_PATH" type="text" />
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <section class="card full-width stats-card" id="statsPanel" aria-live="polite">
+          <div class="stats-header">
+            <h2 class="stats-title">
+              <span class="stats-icon">📊</span>
+              通信量の削減状況
+            </h2>
+            <div class="stats-meta">
+              <span id="statsUpdated" class="stats-meta-text">更新: --</span>
+              <button type="button" id="statsRefresh" class="btn-ghost btn-small">更新</button>
+            </div>
+          </div>
+          <div class="stats-summary">
+            <div class="stat-box">
+              <div class="stat-label">累計削減量</div>
+              <div class="stat-value" id="statsSavedBytes">--</div>
+              <div class="stat-sub" id="statsSavedPercent">--</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">累計処理件数</div>
+              <div class="stat-value" id="statsRequestCount">--</div>
+              <div class="stat-sub" id="statsSince">起点: --</div>
+            </div>
+          </div>
+          <div class="stats-table-wrapper">
+            <table class="stats-table">
+              <thead>
+                <tr>
+                  <th scope="col">カテゴリ</th>
+                  <th scope="col">件数</th>
+                  <th scope="col">削減量</th>
+                  <th scope="col">削減率</th>
+                  <th scope="col">備考</th>
+                </tr>
+              </thead>
+              <tbody id="statsCategoryBody">
+                <tr>
+                  <td colspan="5" class="stats-empty">読み込み中...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 固定表示される保存バー -->
+    <div id="fixedBar" class="fixed-bar" aria-hidden="false">
+      <div class="fixed-bar-inner">
+        <button id="btnLoadFixed" class="btn-ghost" type="button">
+          <span class="btn-icon">↻</span>
+          再読み込み
+        </button>
+        <button id="btnSaveFixed" class="btn-primary" type="button">
+          <span class="btn-icon">✓</span>
+          保存
+        </button>
+        <button id="themeToggle" class="btn-ghost" type="button">
+          <span class="btn-icon">🌙</span>
+          <span class="btn-text">ダーク</span>
+        </button>
+      </div>
+    </div>
+    <div class="status-popup-stack" id="statusPopupContainer" aria-live="polite" aria-atomic="true"></div>
+
+    <script>
+      // ==========================================
+      // スクリプト概要（日本語）
+      // このスクリプトはフォームとサーバ上の設定ファイルを同期します。
+      // 主な機能:
+      //  - /setting/data から設定ファイルを取得してフォームに反映する (loadConfig)
+      //  - フォームの値から設定ファイル形式のテキストを生成する (buildConfigText)
+      //  - /setting/save に POST して保存する (saveConfig)
+      //  - UI 表示の補助（スライダーの出力表示、トグルスイッチのビジュアル化）
+      //  - 入力検証と未保存判定（dirty チェック）
+      // 実行ロジックは元のままにし、可読性向上のためのコメントのみ追加しています。
+      // ==========================================
+      /*
+    切り替えガイド（開発者向け）
+
+    現在の実装:
+      - 行の無効化は "出現/消滅"（CSS クラス `.row.hidden` を付け外し）で表現しています。
+        これは DOM 上で要素を完全に非表示にするため、ユーザーから見えなくなり、操作できなくなります。
+      - 元の実装（色でディアクティブ）はコメントアウトして残してあります（`.row.disabled` を付け外し）。
+
+    目的:
+      - すぐに元に戻せるよう、どの箇所を変更すればよいか手順を残します。
+
+    1) 元の（色でディアクティブ）方式に戻す手順（手動）
+      - 該当箇所: populateForm と init 内の各 toggle ロジック（COMPRESSION, IMAGE_MODE, RATE_LIMIT, RESTART）にあります。
+      - 例: 現在は以下のようになっています（出現/消滅）:
+          row.classList.add('hidden');
+           // row.classList.add('disabled');
+          webpFastRow.classList.remove('hidden');
+           // webpFastRow.classList.remove('disabled');
+      - 元に戻すには上記でコメント化されている行のコメントを外し、`hidden` の行をコメントアウトまたは削除してください:
+           // row.classList.add('hidden');
+          row.classList.add('disabled');
+           // webpFastRow.classList.remove('hidden');
+          webpFastRow.classList.remove('disabled');
+
+    2) アクセシビリティ向けに input の無効化（推奨）を追加する方法
+      - 視覚的に非表示にするだけでなく、関連する input 要素に対して `el.disabled = true/false` を切り替えると、キーボード操作やスクリーンリーダーに対しても明確になります。
+      - 例（toggle 関数内に追加）:
+          const slider = byId('COMPRESSION_THRESHOLD');
+          if (disable) {
+            row.classList.add('hidden');
+             if (slider) slider.disabled = true;  // ここを追加
+          } else {
+            row.classList.remove('hidden');
+             if (slider) slider.disabled = false; // ここを追加
+          }
+
+    3) 安全対策
+      - まずはコメントアウトで旧実装を残しています。動作確認後に不要であればコメント行を削除して整理してください。
+      - 変更は populateForm（初期反映）と init（ユーザー操作時）双方に反映してください。
+
+    参考: 変更箇所を grep したい場合のキーワード
+      - "classList.add('hidden')" / "classList.remove('hidden')"
+      - コメント化された旧行: "classList.add('disabled')" / "classList.remove('disabled')"
+
+  */
+      // フォーム要素と設定キーのマッピング
+      const keys = ["COMPRESSION_ENABLED", "COMPRESSION_THRESHOLD", "PORT", "ROOT_PATH", "MAX_LIST", "IMAGE_CONVERSION_ENABLED", "PHOTO_SIZE", "DEFAULT_QUALITY", "IMAGE_MODE", "CACHE_TTL_MS", "CACHE_MIN_SIZE", "MAX_CONCURRENCY", "SHARP_MEMORY_LIMIT", "SHARP_PIXEL_LIMIT", "WEBP_EFFORT", "WEBP_EFFORT_FAST", "WEBP_PRESET", "WEBP_REDUCTION_EFFORT", "WEBP_DETAILED_ENABLED", "RATE_LIMIT_ENABLED", "RATE_LIMIT_REQUESTS", "RATE_LIMIT_WINDOW_MS", "RATE_LIMIT_QUEUE_SIZE", "EMERGENCY_DISABLE_RATE_LIMIT", "STACK_MAX_SIZE", "STACK_PROCESSING_DELAY_MS", "RESTART_ENABLED", "RESTART_TIME", "MAGICK_PATH"];
+
+      // ヘルパー関数
+      const byId = (id) => document.getElementById(id);
+      const statusEl = byId("status");
+      const popupContainer = byId("statusPopupContainer");
+      const rawEl = byId("raw");
+      const themeBtn = byId("themeToggle");
+      const statsEls = {
+        panel: document.getElementById("statsPanel"),
+        refreshBtn: document.getElementById("statsRefresh"),
+        savedBytes: document.getElementById("statsSavedBytes"),
+        savedPercent: document.getElementById("statsSavedPercent"),
+        requestCount: document.getElementById("statsRequestCount"),
+        since: document.getElementById("statsSince"),
+        updated: document.getElementById("statsUpdated"),
+        tbody: document.getElementById("statsCategoryBody"),
+      };
+      // 未保存検出のための初期スナップショット
+      let initialConfigText = null;
+      let statsIntervalId = null;
+
+      // テーマ切替ヘルパー（ライト/ダーク）
+      function applyTheme(theme) {
+        if (theme === "dark") document.documentElement.setAttribute("data-theme", "dark");
+        else document.documentElement.removeAttribute("data-theme");
+        try {
+          if (themeBtn) {
+            const btnText = themeBtn.querySelector(".btn-text");
+            const btnIcon = themeBtn.querySelector(".btn-icon");
+            if (btnText) btnText.textContent = theme === "dark" ? "ライト" : "ダーク";
+            if (btnIcon) btnIcon.textContent = theme === "dark" ? "☀️" : "🌙";
+          }
+        } catch (e) {}
+      }
+
+      function loadTheme() {
+        try {
+          const t = localStorage.getItem("settings_theme") || "light";
+          applyTheme(t);
+        } catch (e) {}
+      }
+
+      function toggleTheme() {
+        try {
+          const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+          const next = current === "dark" ? "light" : "dark";
+          localStorage.setItem("settings_theme", next);
+          applyTheme(next);
+        } catch (e) {}
+      }
+
+      const statsCategoryLabels = {
+        image: "画像変換",
+        text: "テキスト圧縮",
+      };
+
+      function formatBytesHuman(bytes) {
+        const num = Number(bytes);
+        if (!Number.isFinite(num) || num <= 0) return "0 B";
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let value = num;
+        let unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.length - 1) {
+          value /= 1024;
+          unitIndex++;
+        }
+        const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+        return `${value.toFixed(digits)} ${units[unitIndex]}`;
+      }
+
+      function formatPercentFromRatio(ratio) {
+        const num = Number(ratio);
+        if (!Number.isFinite(num) || num <= 0) return "0%";
+        const value = num * 100;
+        return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+      }
+
+      function formatDateTime(isoString) {
+        if (!isoString) return "--";
+        try {
+          return new Date(isoString).toLocaleString("ja-JP", { hour12: false });
+        } catch (e) {
+          return isoString;
+        }
+      }
+
+      // メッセージ内容に応じた装飾情報を返す
+      function resolveStatusVisual(message, err) {
+        const base = { className: "", title: "お知らせ", icon: "i" };
+        if (!message) return base;
+        if (err) return { className: "is-error", title: "エラー", icon: "!" };
+        if (/完了|成功|完了しました|保存が完了/.test(message)) {
+          return { className: "is-success", title: "成功", icon: "✓" };
+        }
+        if (/中|実行|確認|読み込み/.test(message)) {
+          return { className: "is-progress", title: "処理中", icon: "…" };
+        }
+        return base;
+      }
+
+      // ステータスメッセージをポップアップ表示する
+      function showStatusPopup(message, err) {
+        try {
+          if (!popupContainer || !message) return;
+          const visual = resolveStatusVisual(message, err);
+          const item = document.createElement("div");
+          item.className = "status-popup" + (visual.className ? ` ${visual.className}` : "");
+          item.setAttribute("role", "status");
+          const icon = document.createElement("span");
+          icon.className = "status-popup-icon";
+          icon.textContent = visual.icon;
+          const body = document.createElement("div");
+          body.className = "status-popup-body";
+          const title = document.createElement("div");
+          title.className = "status-popup-title";
+          title.textContent = visual.title;
+          const text = document.createElement("div");
+          text.className = "status-popup-message";
+          text.textContent = message;
+          body.appendChild(title);
+          body.appendChild(text);
+          item.appendChild(icon);
+          item.appendChild(body);
+          popupContainer.appendChild(item);
+          requestAnimationFrame(() => item.classList.add("is-visible"));
+          setTimeout(() => {
+            item.classList.remove("is-visible");
+            setTimeout(() => {
+              try {
+                item.remove();
+              } catch (e) {}
+            }, 220);
+          }, 2000);
+        } catch (e) {}
+      }
+
+      function setStatus(msg, err) {
+        try {
+          if (msg) showStatusPopup(msg, err);
+          if (!statusEl) return;
+          statusEl.textContent = msg || "";
+          statusEl.style.color = err ? "var(--danger)" : "";
+        } catch (e) {
+          // ステータス要素が存在しない場合の DOM 書き込みエラーを無視
+        }
+      }
+
+      function renderStats(snapshot) {
+        if (!statsEls.panel) return;
+        const totals = snapshot && snapshot.totals ? snapshot.totals : {};
+        if (statsEls.savedBytes) statsEls.savedBytes.textContent = formatBytesHuman(totals.savedBytes);
+        if (statsEls.savedPercent) statsEls.savedPercent.textContent = formatPercentFromRatio(totals.reductionRatio);
+        if (statsEls.requestCount) statsEls.requestCount.textContent = (totals.requests || 0).toLocaleString("ja-JP");
+        if (statsEls.since) {
+          statsEls.since.textContent = snapshot && snapshot.since ? `開始: ${formatDateTime(snapshot.since)}` : "開始: --";
+        }
+        if (statsEls.updated) {
+          statsEls.updated.textContent = snapshot && snapshot.lastUpdated ? `更新: ${formatDateTime(snapshot.lastUpdated)}` : "更新: --";
+        }
+        if (statsEls.tbody) {
+          statsEls.tbody.innerHTML = buildStatsRows(snapshot && snapshot.categories);
+        }
+      }
+
+      function renderStatsError(message) {
+        if (!statsEls.panel || !statsEls.tbody) return;
+        statsEls.savedBytes && (statsEls.savedBytes.textContent = "--");
+        statsEls.savedPercent && (statsEls.savedPercent.textContent = "--");
+        statsEls.requestCount && (statsEls.requestCount.textContent = "--");
+        statsEls.updated && (statsEls.updated.textContent = "更新: エラー");
+        statsEls.tbody.innerHTML = `<tr><td colspan="5" class="stats-empty">取得できませんでした (${message})</td></tr>`;
+      }
+
+      function buildStatsRows(categories) {
+        const entries = Object.entries(categories || {});
+        if (!entries.length) {
+          return '<tr><td colspan="5" class="stats-empty">まだデータがありません</td></tr>';
+        }
+        return entries
+          .map(([key, data]) => {
+            const label = statsCategoryLabels[key] || key;
+            const requests = (data && data.requests ? data.requests : 0).toLocaleString("ja-JP");
+            const saved = formatBytesHuman(data && data.savedBytes);
+            const percent = formatPercentFromRatio(data && data.reductionRatio);
+            const memoParts = [];
+            if (data && data.cacheHits) memoParts.push(`キャッシュ ${data.cacheHits.toLocaleString("ja-JP")}件`);
+            if (data && data.maxSavedBytes) memoParts.push(`最大 ${formatBytesHuman(data.maxSavedBytes)}`);
+            const memo = memoParts.length ? memoParts.join(" / ") : "—";
+            return `<tr><th scope="row">${label}</th><td>${requests}</td><td>${saved}</td><td>${percent}</td><td>${memo}</td></tr>`;
+          })
+          .join("");
+      }
+
+      async function loadStatsPanel(manual) {
+        if (!statsEls.panel) return;
+        if (manual) {
+          if (statsEls.refreshBtn) statsEls.refreshBtn.disabled = true;
+          showStatusPopup("通信量の削減状況を再読込中...", false);
+        }
+        try {
+          const response = await fetch("/setting/stats");
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          const snapshot = await response.json();
+          renderStats(snapshot);
+          if (manual) showStatusPopup("通信量の削減状況を更新しました", false);
+        } catch (err) {
+          const msg = err && err.message ? err.message : "unknown";
+          renderStatsError(msg);
+          if (manual) showStatusPopup("通信量の削減状況の取得に失敗しました: " + msg, true);
+        } finally {
+          if (manual && statsEls.refreshBtn) statsEls.refreshBtn.disabled = false;
+        }
+      }
+
+      function initStatsPanel() {
+        if (!statsEls.panel) return;
+        loadStatsPanel(true);
+        if (statsEls.refreshBtn) {
+          statsEls.refreshBtn.addEventListener("click", () => loadStatsPanel(true));
+        }
+        if (statsIntervalId) clearInterval(statsIntervalId);
+        statsIntervalId = setInterval(loadStatsPanel, 15000);
+      }
+
+      // config.txt の内容を解析して { KEY: value } 形式のオブジェクトを返す
+      // - コメント行(#)および空行は無視
+      // - 値は文字列として保持し、UI 側で必要に応じて型変換する
+      function parseConfig(text) {
+        const out = {};
+        const lines = text.split(/\r?\n/);
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t || t.startsWith("#")) continue;
+          const idx = t.indexOf("=");
+          if (idx === -1) continue;
+          const k = t.slice(0, idx).trim();
+          let v = t.slice(idx + 1).trim();
+          // 値は文字列のまま保持し、UI 側で真偽値や数値として解釈します
+          out[k] = v;
+        }
+        return out;
+      }
+
+      // 設定オブジェクトからフォーム要素に値を反映する
+      // - チェックボックスは 'true'/'false' 文字列を真偽に変換
+      // - 一部の項目は表示単位（秒/KB）に変換して表示する
+      function populateForm(cfg) {
+        for (const k of keys) {
+          const el = byId(k);
+          if (!el) continue;
+          const v = cfg[k];
+          if (el.type === "checkbox") {
+            el.checked = typeof v !== "undefined" ? String(v).toLowerCase() === "true" : false;
+          } else {
+            el.value = typeof v !== "undefined" ? v : "";
+          }
+        }
+        // 生データプレビューを表示/更新
+        buildRaw();
+        // 圧縮閾値スライダーの表示を更新（読み込んだ設定を反映）
+        try {
+          const compSlider = byId("COMPRESSION_THRESHOLD");
+          const compOut = byId("COMPRESSION_THRESHOLD_VAL");
+          if (compSlider && compOut) {
+            const n = Number(compSlider.value || 0);
+            compOut.textContent = isNaN(n) ? "0.00" : n.toFixed(2);
+          }
+          // 圧縮有効フラグに応じて圧縮閾値行を有効/無効化
+          try {
+            const compRow = compSlider ? compSlider.closest(".row") : null;
+            const compFlag = byId("COMPRESSION_ENABLED");
+            if (compRow && compFlag) {
+              // 子項目インデント
+              try {
+                compRow.classList.add("child");
+              } catch (e) {}
+              if (compFlag.checked) {
+                compRow.classList.remove("hidden");
+                // compRow.classList.remove('disabled');
+              } else {
+                compRow.classList.add("hidden");
+                // compRow.classList.add('disabled');
+              }
+            }
+          } catch (e) {}
+        } catch (e) {}
+        // CACHE_TTL_MS（設定ファイルは ms）を UI 用に秒に変換
+        try {
+          const el = byId("CACHE_TTL_MS");
+          if (el) {
+            const raw = cfg["CACHE_TTL_MS"];
+            if (typeof raw !== "undefined" && raw !== "") {
+              const ms = Number(raw);
+              if (!isNaN(ms)) el.value = String(Math.round(ms / 1000));
+            }
+          }
+        } catch (e) {}
+        // CACHE_MIN_SIZE（設定ファイルは bytes）を UI 用に KB に変換
+        try {
+          const el = byId("CACHE_MIN_SIZE");
+          if (el) {
+            const raw = cfg["CACHE_MIN_SIZE"];
+            if (typeof raw !== "undefined" && raw !== "") {
+              const bytes = Number(raw);
+              if (!isNaN(bytes)) el.value = String(Math.round(bytes / 1024));
+            }
+          }
+        } catch (e) {}
+        // RATE_LIMIT_WINDOW_MS（設定ファイルは ms）を UI 用に秒に変換
+        try {
+          const el = byId("RATE_LIMIT_WINDOW_MS");
+          if (el) {
+            const raw = cfg["RATE_LIMIT_WINDOW_MS"];
+            if (typeof raw !== "undefined" && raw !== "") {
+              const ms = Number(raw);
+              if (!isNaN(ms)) el.value = String(Math.round(ms / 1000));
+            }
+          }
+        } catch (e) {}
+        // DEFAULT_QUALITY の表示を更新
+        try {
+          const qSlider = byId("DEFAULT_QUALITY");
+          const qOut = byId("DEFAULT_QUALITY_VAL");
+          if (qSlider && qOut) {
+            const n = Number(qSlider.value || 50);
+            qOut.textContent = isNaN(n) ? "50" : String(n);
+          }
+        } catch (e) {}
+        // WEBP_EFFORT と WEBP_EFFORT_FAST の表示更新
+        try {
+          const eSlider = byId("WEBP_EFFORT");
+          const eOut = byId("WEBP_EFFORT_VAL");
+          if (eSlider && eOut) {
+            const n = Number(eSlider.value || 1);
+            eOut.textContent = isNaN(n) ? "1" : String(Math.round(n));
+          }
+        } catch (e) {}
+        try {
+          const efSlider = byId("WEBP_EFFORT_FAST");
+          const efOut = byId("WEBP_EFFORT_FAST_VAL");
+          if (efSlider && efOut) {
+            const n = Number(efSlider.value || 0);
+            efOut.textContent = isNaN(n) ? "0" : String(Math.round(n));
+          }
+        } catch (e) {}
+        try {
+          const reSlider = byId("WEBP_REDUCTION_EFFORT");
+          const reOut = byId("WEBP_REDUCTION_EFFORT_VAL");
+          if (reSlider && reOut) {
+            const n = Number(reSlider.value || 0);
+            reOut.textContent = isNaN(n) ? "0" : String(Math.round(n));
+          }
+        } catch (e) {}
+        // IMAGE_CONVERSION_ENABLED の初期状態に応じて画像変換関連項目を有効/無効化
+        try {
+          const imgConvFlag = byId("IMAGE_CONVERSION_ENABLED");
+          const imgTemplateRow = byId("image-template-row");
+          const photoSizeRow = byId("photo-size-row");
+          const defaultQualityRow = byId("default-quality-row");
+          const imageModeRow = byId("image-mode-row");
+          const webpEffortRow = byId("webp-effort-row");
+          const webpEffortFastRow = byId("webp-effort-fast-row");
+          const webpDetailedEnabledRow = byId("webp-detailed-enabled-row");
+          const webpPresetRow = byId("webp-detailed-preset-row");
+          const webpReductionRow = byId("webp-detailed-reduction-row");
+          if (imgConvFlag && (imgTemplateRow || photoSizeRow || defaultQualityRow || imageModeRow)) {
+            // 子項目インデント
+            try {
+              [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach((r) => {
+                if (r) r.classList.add("child");
+              });
+            } catch (e) {}
+            const disable = !imgConvFlag.checked;
+            [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach((r) => {
+              if (!r) return;
+              if (disable) {
+                r.classList.add("hidden"); /* r.classList.add('disabled'); */
+              } else {
+                r.classList.remove("hidden"); /* r.classList.remove('disabled'); */
+              }
+            });
+          }
+        } catch (e) {}
+        // IMAGE_MODE に応じて WebP effort の行を有効/無効化（IMAGE_CONVERSION_ENABLEDが有効な場合のみ）
+        try {
+          const imgConvFlag = byId("IMAGE_CONVERSION_ENABLED");
+          const imgMode = byId("IMAGE_MODE");
+          const webpRow = byId("WEBP_EFFORT") ? byId("WEBP_EFFORT").closest(".row") : null;
+          const webpFastRow = byId("WEBP_EFFORT_FAST") ? byId("WEBP_EFFORT_FAST").closest(".row") : null;
+          if (imgMode && webpRow && webpFastRow && imgConvFlag && imgConvFlag.checked) {
+            // モード '1' = 高速モード (高速用 effort を有効にする)
+            if (String(imgMode.value) === "1") {
+              webpRow.classList.add("hidden");
+              // webpRow.classList.add('disabled');
+              webpFastRow.classList.remove("hidden");
+              // webpFastRow.classList.remove('disabled');
+            } else {
+              webpRow.classList.remove("hidden");
+              // webpRow.classList.remove('disabled');
+              webpFastRow.classList.add("hidden");
+              // webpFastRow.classList.add('disabled');
+            }
+          }
+        } catch (e) {}
+        // WEBP_DETAILED_ENABLED の初期状態に応じて関連行を有効/無効化（IMAGE_CONVERSION_ENABLEDが有効な場合のみ）
+        try {
+          const imgConvFlag = byId("IMAGE_CONVERSION_ENABLED");
+          const webpDetailedFlag = byId("WEBP_DETAILED_ENABLED");
+          const webpPresetRow = byId("webp-detailed-preset-row");
+          const webpReductionRow = byId("webp-detailed-reduction-row");
+          if (webpDetailedFlag && (webpPresetRow || webpReductionRow) && imgConvFlag && imgConvFlag.checked) {
+            // さらに深い階層の子項目インデント
+            try {
+              [webpPresetRow, webpReductionRow].forEach((r) => {
+                if (r) {
+                  r.classList.remove("child");
+                  r.classList.add("child-2");
+                }
+              });
+            } catch (e) {}
+            const disable = !webpDetailedFlag.checked;
+            [webpPresetRow, webpReductionRow].forEach((r) => {
+              if (!r) return;
+              if (disable) {
+                r.classList.add("hidden"); /* r.classList.add('disabled'); */
+              } else {
+                r.classList.remove("hidden"); /* r.classList.remove('disabled'); */
+              }
+            });
+          }
+        } catch (e) {}
+        // RATE_LIMIT_ENABLED に応じてレート制限関連行を有効/無効化
+        try {
+          const rateFlag = byId("RATE_LIMIT_ENABLED");
+          const rReq = byId("RATE_LIMIT_REQUESTS") ? byId("RATE_LIMIT_REQUESTS").closest(".row") : null;
+          const rWin = byId("RATE_LIMIT_WINDOW_MS") ? byId("RATE_LIMIT_WINDOW_MS").closest(".row") : null;
+          const rQueue = byId("RATE_LIMIT_QUEUE_SIZE") ? byId("RATE_LIMIT_QUEUE_SIZE").closest(".row") : null;
+          if (rateFlag && (rReq || rWin || rQueue)) {
+            // 子項目インデント
+            try {
+              [rReq, rWin, rQueue].forEach((r) => {
+                if (r) r.classList.add("child");
+              });
+            } catch (e) {}
+            const disable = !rateFlag.checked;
+            [rReq, rWin, rQueue].forEach((r) => {
+              if (!r) return;
+              if (disable) {
+                r.classList.add("hidden"); /* r.classList.add('disabled'); */
+              } else {
+                r.classList.remove("hidden"); /* r.classList.remove('disabled'); */
+              }
+            });
+          }
+        } catch (e) {}
+        // RESTART_ENABLED に応じて自動再起動時刻入力を有効/無効化
+        try {
+          const restartFlag = byId("RESTART_ENABLED");
+          const restartTimeRow = byId("RESTART_TIME") ? byId("RESTART_TIME").closest(".row") : null;
+          if (restartFlag && restartTimeRow) {
+            // 子項目インデント
+            try {
+              restartTimeRow.classList.add("child");
+            } catch (e) {}
+            if (restartFlag.checked) {
+              restartTimeRow.classList.remove("hidden");
+              // restartTimeRow.classList.remove('disabled');
+            } else {
+              restartTimeRow.classList.add("hidden");
+              // restartTimeRow.classList.add('disabled');
+            }
+          }
+        } catch (e) {}
+        // WEBP_DETAILED_ENABLED の初期状態に応じて関連行を有効/無効化（初期表示時の折り畳み解除対応）
+        try {
+          const webpDetailedFlag = byId("WEBP_DETAILED_ENABLED");
+          const webpPresetRow = byId("webp-detailed-preset-row");
+          const webpReductionRow = byId("webp-detailed-reduction-row");
+          const imgConvFlag = byId("IMAGE_CONVERSION_ENABLED");
+          // 表示切替は画像変換機能が有効な場合にのみ反映する。
+          if (webpDetailedFlag && (webpPresetRow || webpReductionRow) && imgConvFlag && imgConvFlag.checked) {
+            const disable = !webpDetailedFlag.checked;
+            [webpPresetRow, webpReductionRow].forEach((r) => {
+              if (!r) return;
+              if (disable) {
+                r.classList.add("hidden"); /* r.classList.add('disabled'); */
+              } else {
+                r.classList.remove("hidden"); /* r.classList.remove('disabled'); */
+              }
+            });
+          } else {
+            // IMAGE_CONVERSION_ENABLED が無効な場合は常に折り畳む
+            [webpPresetRow, webpReductionRow].forEach((r) => {
+              if (!r) return;
+              r.classList.add("hidden");
+            });
+          }
+        } catch (e) {}
+        // PHOTO_SIZE スライダー表示を更新 (px 表示)
+        try {
+          const pSlider = byId("PHOTO_SIZE");
+          const pOut = byId("PHOTO_SIZE_VAL");
+          if (pSlider && pOut) {
+            const n = Number(pSlider.value || 1080);
+            pOut.textContent = isNaN(n) ? "1080" : String(Math.round(n));
+          }
+        } catch (e) {}
+        // MAX_CONCURRENCY の表示を更新
+        try {
+          const mSlider = byId("MAX_CONCURRENCY");
+          const mOut = byId("MAX_CONCURRENCY_VAL");
+          if (mSlider && mOut) {
+            const n = Number(mSlider.value || 4);
+            mOut.textContent = isNaN(n) ? "4" : String(Math.round(n));
+          }
+        } catch (e) {}
+        // SHARP_MEMORY_LIMIT の表示を更新
+        try {
+          const sSlider = byId("SHARP_MEMORY_LIMIT");
+          const sOut = byId("SHARP_MEMORY_LIMIT_VAL");
+          if (sSlider && sOut) {
+            const n = Number(sSlider.value || 512);
+            sOut.textContent = isNaN(n) ? "512" : String(Math.round(n));
+          }
+        } catch (e) {}
+        // チェックボックス行のトグル表示をチェック状態に同期
+        try {
+          document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+            try {
+              const row = cb.closest(".checkbox-row");
+              if (!row) return;
+              const sw = row.querySelector(".switch");
+              if (!sw) return;
+              if (cb.checked) sw.classList.add("on");
+              else sw.classList.remove("on");
+              sw.setAttribute("aria-checked", cb.checked ? "true" : "false");
+            } catch (e) {}
+          });
+        } catch (e) {}
+      }
+
+      // フォームの現在値を設定ファイル形式のテキストに組み立てる
+      // - UI 表示の単位変換（秒→ms、KB→bytes）を逆変換してファイル用の値に整形する
+      function buildConfigText() {
+        const header = ["# WebDAV画像変換サーバー設定ファイル (自動生成)", "# 編集はフォームで行ってください。"];
+        const lines = [...header];
+        // 出力順（元ファイルに近い順序）
+        const add = (k) => {
+          const el = byId(k);
+          if (!el) return;
+          let v;
+          if (el.type === "checkbox") v = el.checked ? "true" : "false";
+          else if (k === "CACHE_TTL_MS") {
+            // UI は秒表示。設定ファイル用にミリ秒に戻す
+            const secs = Number(el.value || 0);
+            v = String(Math.round((isNaN(secs) ? 0 : secs) * 1000));
+          } else if (k === "CACHE_MIN_SIZE") {
+            // UI は KB 表示。設定ファイル用にバイトに戻す
+            const kb = Number(el.value || 0);
+            v = String(Math.round((isNaN(kb) ? 0 : kb) * 1024));
+          } else if (k === "RATE_LIMIT_WINDOW_MS") {
+            // UI は秒表示。設定ファイル用にミリ秒に戻す
+            const secs = Number(el.value || 0);
+            v = String(Math.round((isNaN(secs) ? 0 : secs) * 1000));
+          } else v = el.value ?? "";
+          lines.push(`${k}=${v}`);
+        };
+        const groups = [["COMPRESSION_ENABLED", "COMPRESSION_THRESHOLD"], ["PORT", "ROOT_PATH", "MAX_LIST"], ["IMAGE_CONVERSION_ENABLED", "PHOTO_SIZE", "DEFAULT_QUALITY", "IMAGE_MODE"], ["WEBP_EFFORT", "WEBP_EFFORT_FAST", "WEBP_PRESET", "WEBP_REDUCTION_EFFORT", "WEBP_DETAILED_ENABLED"], ["CACHE_TTL_MS", "CACHE_MIN_SIZE", "MAX_CONCURRENCY", "SHARP_MEMORY_LIMIT", "SHARP_PIXEL_LIMIT"], ["RATE_LIMIT_ENABLED", "RATE_LIMIT_REQUESTS", "RATE_LIMIT_WINDOW_MS", "RATE_LIMIT_QUEUE_SIZE"], ["EMERGENCY_DISABLE_RATE_LIMIT"], ["STACK_MAX_SIZE", "STACK_PROCESSING_DELAY_MS"], ["RESTART_ENABLED", "RESTART_TIME"], ["MAGICK_PATH"]];
+        for (const g of groups) {
+          lines.push(""); // グループ間に空行を挿入
+          for (const k of g) add(k);
+        }
+        return lines.join("\n") + "\n";
+      }
+
+      // テキストプレビュー（raw）を更新する
+      function buildRaw() {
+        if (!rawEl) return;
+        rawEl.textContent = buildConfigText();
+      }
+
+      // 保存ボタンの有効/無効を切り替える
+      function setSaveEnabled(enabled) {
+        try {
+          const btns = [];
+          const a = byId("btnSave");
+          if (a) btns.push(a);
+          const b = byId("btnSaveFixed");
+          if (b) btns.push(b);
+          for (const btn of btns) {
+            btn.disabled = !enabled;
+            if (!enabled) btn.setAttribute("aria-disabled", "true");
+            else btn.removeAttribute("aria-disabled");
+          }
+        } catch (e) {}
+      }
+
+      // 初期スナップショットと比較して変更があれば true を返す（未保存判定）
+      function checkDirty() {
+        try {
+          const cur = buildConfigText();
+          const dirty = initialConfigText === null ? false : cur !== initialConfigText;
+          setSaveEnabled(dirty);
+          return dirty;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      // 入力の簡易バリデーションを行う
+      // 成功: {ok:true}
+      // 失敗: {ok:false, msg: 'エラーメッセージ'}
+      function validate() {
+        // 例: ポート範囲
+        const port = Number(byId("PORT").value || 0);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, msg: "PORT は 1..65535 の整数で指定してください" };
+        const q = Number(byId("DEFAULT_QUALITY").value || 0);
+        if (!Number.isFinite(q) || q < 1 || q > 100) return { ok: false, msg: "DEFAULT_QUALITY は 1..100 で指定してください" };
+        const pct = Number(byId("COMPRESSION_THRESHOLD").value || -1);
+        if (!Number.isFinite(pct) || pct < 0 || pct > 1) return { ok: false, msg: "COMPRESSION_THRESHOLD は 0.0 〜 1.0 の値で指定してください" };
+        // CACHE_TTL_MS は UI で秒表示
+        const cacheSecs = Number(byId("CACHE_TTL_MS").value || 0);
+        if (!Number.isFinite(cacheSecs) || cacheSecs < 0) return { ok: false, msg: "CACHE_TTL_MS は 0 以上の秒数で指定してください" };
+        // RATE_LIMIT_WINDOW_MS は UI で秒表示
+        const rateWindowSecs = Number(byId("RATE_LIMIT_WINDOW_MS").value || 0);
+        if (!Number.isFinite(rateWindowSecs) || rateWindowSecs < 0) return { ok: false, msg: "RATE_LIMIT_WINDOW_MS は 0 以上の秒数で指定してください" };
+        // CACHE_MIN_SIZE は UI で KB 表示
+        const cacheMinKb = Number(byId("CACHE_MIN_SIZE").value || 0);
+        if (!Number.isFinite(cacheMinKb) || cacheMinKb < 0) return { ok: false, msg: "CACHE_MIN_SIZE は 0 以上の KB で指定してください" };
+        return { ok: true };
+      }
+
+      // サーバーから設定データを取得してフォームに反映する非同期関数
+      // エンドポイント: GET /setting/data
+      async function loadConfig() {
+        setStatus("読み込み中...");
+        try {
+          const r = await fetch("/setting/data");
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          const j = await r.json();
+          const txt = j.content || "";
+          const statusLocal = byId("status");
+          if (statusLocal) statusLocal.textContent = "";
+          const cfg = parseConfig(txt);
+          populateForm(cfg);
+          // 未保存チェック用のスナップショットを保存
+          initialConfigText = buildConfigText();
+          checkDirty();
+          setStatus("読み込みが完了しました");
+        } catch (e) {
+          setStatus("読み込みエラー: " + (e.message || e), true);
+        }
+      }
+
+      // フォームの値を組み立ててサーバに保存する非同期関数
+      // エンドポイント: POST /setting/save
+      async function saveConfig() {
+        setStatus("入力内容を確認しています...");
+        const v = validate();
+        if (!v.ok) {
+          setStatus(v.msg, true);
+          return;
+        }
+        const text = buildConfigText();
+        // 保存前に生データ（raw）プレビューを表示（プレビュー要素が存在する場合のみ）
+        if (rawEl) rawEl.textContent = text;
+        setStatus("保存処理を実行しています...");
+        try {
+          // Node.js 25.0.0最適化: JSON.stringifyの高速化を活用
+          const r = await fetch("/setting/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: text }),
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          // スナップショットを更新し、次の変更まで保存を無効化
+          initialConfigText = buildConfigText();
+          setSaveEnabled(false);
+          setStatus("保存が完了しました");
+        } catch (e) {
+          setStatus("保存エラー: " + (e.message || e), true);
+        }
+      }
+
+      // イベント配線（ボタンがコメントアウトされている場合のガード付き）
+      const btnLoadEl = document.getElementById("btnLoad");
+      const btnSaveEl = document.getElementById("btnSave");
+      const btnRawEl = document.getElementById("btnRaw");
+      if (btnLoadEl) btnLoadEl.addEventListener("click", loadConfig);
+      if (btnSaveEl)
+        btnSaveEl.addEventListener("click", () => {
+          saveConfig();
+        });
+      if (btnRawEl)
+        btnRawEl.addEventListener("click", () => {
+          if (!rawEl) return; // raw プレビューは意図的に削除/コメントアウト済み
+          rawEl.style.display = rawEl.style.display === "none" ? "block" : "none";
+        });
+      if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
+
+      // 初期化
+      (function init() {
+        // デフォルト値を設定
+        for (const k of keys) {
+          const el = byId(k);
+          if (!el) continue;
+          if (el.type === "checkbox") el.checked = false;
+          else el.value = "";
+        }
+        loadConfig();
+        loadTheme();
+        initStatsPanel();
+
+        // システム情報を取得して並列数上限を動的に設定
+        (async () => {
+          try {
+            const r = await fetch("/setting/sysinfo");
+            if (r.ok) {
+              const sysInfo = await r.json();
+              const mSlider = byId("MAX_CONCURRENCY");
+              if (mSlider) {
+                mSlider.max = sysInfo.maxConcurrency || 32;
+                mSlider.setAttribute("data-recommended", sysInfo.recommendedConcurrency || 4);
+                // 推奨値を表示するためのラベルにツールチップを追加
+                const label = mSlider.closest(".row")?.querySelector("label");
+                if (label && sysInfo.recommendedConcurrency) {
+                  const tip = document.createElement("span");
+                  tip.textContent = ` （推奨: ${sysInfo.recommendedConcurrency}）`;
+                  tip.style.fontSize = "0.9em";
+                  tip.style.opacity = "0.7";
+                  label.appendChild(tip);
+                }
+              }
+            }
+          } catch (e) {
+            // システム情報取得エラーは無視（デフォルト値を使用）
+          }
+        })();
+
+        // スナップショットが取得されるまで保存ボタンを無効化
+        setSaveEnabled(false);
+        // 未保存状態を検出するための変更リスナーを配線
+        for (const k of keys) {
+          const el = byId(k);
+          if (!el) continue;
+          const ev = el.type === "checkbox" || el.tagName.toLowerCase() === "select" ? "change" : "input";
+          el.addEventListener(ev, () => checkDirty());
+        }
+        // 圧縮有効チェックボックスが切り替わったときに圧縮閾値を有効/無効にする
+        try {
+          const compFlag = byId("COMPRESSION_ENABLED");
+          const compSlider = byId("COMPRESSION_THRESHOLD");
+          if (compFlag && compSlider) {
+            const toggleCompRow = () => {
+              const row = compSlider.closest(".row");
+              if (!row) return;
+              if (compFlag.checked) {
+                row.classList.remove("hidden");
+                // row.classList.remove('disabled');
+              } else {
+                row.classList.add("hidden");
+                // row.classList.add('disabled');
+              }
+            };
+            compFlag.addEventListener("change", () => {
+              toggleCompRow();
+              checkDirty();
+            });
+            // 初期状態を反映
+            toggleCompRow();
+          }
+        } catch (e) {}
+        // 圧縮閾値スライダーの配線: 出力と未保存状態を更新
+        const compSlider = byId("COMPRESSION_THRESHOLD");
+        const compOut = byId("COMPRESSION_THRESHOLD_VAL");
+        function updateCompressionDisplay(v) {
+          const n = Number(v);
+          if (isNaN(n)) {
+            if (compOut) compOut.textContent = "0.00";
+            return;
+          }
+          if (compOut) compOut.textContent = n.toFixed(2);
+        }
+        if (compSlider) {
+          // populateForm が値を設定する際、表示が更新されることを確認
+          compSlider.addEventListener("input", (e) => {
+            updateCompressionDisplay(e.target.value);
+            checkDirty();
+          });
+          // 現在の値から表示を初期化
+          updateCompressionDisplay(compSlider.value || 0);
+        }
+        // DEFAULT_QUALITY スライダーの配線
+        const qSlider = byId("DEFAULT_QUALITY");
+        const qOut = byId("DEFAULT_QUALITY_VAL");
+        function updateQualityDisplay(v) {
+          const n = Number(v);
+          if (isNaN(n)) {
+            if (qOut) qOut.textContent = "50";
+            return;
+          }
+          if (qOut) qOut.textContent = String(Math.round(n));
+        }
+        if (qSlider) {
+          qSlider.addEventListener("input", (e) => {
+            updateQualityDisplay(e.target.value);
+            checkDirty();
+          });
+          updateQualityDisplay(qSlider.value || 50);
+        }
+        // WEBP_EFFORT スライダーの配線
+        const eSlider = byId("WEBP_EFFORT");
+        const eOut = byId("WEBP_EFFORT_VAL");
+        function updateWebpEffortDisplay(v) {
+          const n = Number(v);
+          if (isNaN(n)) {
+            if (eOut) eOut.textContent = "1";
+            return;
+          }
+          if (eOut) eOut.textContent = String(Math.round(n));
+        }
+        if (eSlider) {
+          eSlider.addEventListener("input", (ev) => {
+            updateWebpEffortDisplay(ev.target.value);
+            checkDirty();
+          });
+          updateWebpEffortDisplay(eSlider.value || 1);
+        }
+        // WEBP_EFFORT_FAST スライダーの配線
+        const efSlider = byId("WEBP_EFFORT_FAST");
+        const efOut = byId("WEBP_EFFORT_FAST_VAL");
+        function updateWebpEffortFastDisplay(v) {
+          const n = Number(v);
+          if (isNaN(n)) {
+            if (efOut) efOut.textContent = "0";
+            return;
+          }
+          if (efOut) efOut.textContent = String(Math.round(n));
+        }
+        if (efSlider) {
+          efSlider.addEventListener("input", (ev) => {
+            updateWebpEffortFastDisplay(ev.target.value);
+            checkDirty();
+          });
+          updateWebpEffortFastDisplay(efSlider.value || 0);
+        }
+        // WEBP_REDUCTION_EFFORT スライダーの配線
+        const reSlider = byId("WEBP_REDUCTION_EFFORT");
+        const reOut = byId("WEBP_REDUCTION_EFFORT_VAL");
+        function updateWebpReductionEffortDisplay(v) {
+          const n = Number(v);
+          if (isNaN(n)) {
+            if (reOut) reOut.textContent = "0";
+            return;
+          }
+          if (reOut) reOut.textContent = String(Math.round(n));
+        }
+        if (reSlider) {
+          reSlider.addEventListener("input", (ev) => {
+            updateWebpReductionEffortDisplay(ev.target.value);
+            checkDirty();
+          });
+          updateWebpReductionEffortDisplay(reSlider.value || 0);
+        }
+        // PHOTO_SIZE スライダーの配線
+        const pSlider = byId("PHOTO_SIZE");
+        const pOut = byId("PHOTO_SIZE_VAL");
+        function updatePhotoSizeDisplay(v) {
+          const n = Number(v);
+          if (isNaN(n)) {
+            if (pOut) pOut.textContent = "1080";
+            return;
+          }
+          if (pOut) pOut.textContent = String(Math.round(n));
+        }
+        if (pSlider) {
+          pSlider.addEventListener("input", (e) => {
+            updatePhotoSizeDisplay(e.target.value);
+            checkDirty();
+          });
+          // 初期表示
+          updatePhotoSizeDisplay(pSlider.value || 1080);
+        }
+        // MAX_CONCURRENCY スライダーの配線
+        const mSlider = byId("MAX_CONCURRENCY");
+        const mOut = byId("MAX_CONCURRENCY_VAL");
+        function updateMaxConcurrencyDisplay(v) {
+          const n = Number(v);
+          if (isNaN(n)) {
+            if (mOut) mOut.textContent = "4";
+            return;
+          }
+          if (mOut) mOut.textContent = String(Math.round(n));
+        }
+        if (mSlider) {
+          mSlider.addEventListener("input", (e) => {
+            updateMaxConcurrencyDisplay(e.target.value);
+            checkDirty();
+          });
+          updateMaxConcurrencyDisplay(mSlider.value || 4);
+        }
+        // SHARP_MEMORY_LIMIT スライダーの配線
+        const sSlider = byId("SHARP_MEMORY_LIMIT");
+        const sOut = byId("SHARP_MEMORY_LIMIT_VAL");
+        function updateSharpMemoryDisplay(v) {
+          const n = Number(v);
+          if (isNaN(n)) {
+            if (sOut) sOut.textContent = "512";
+            return;
+          }
+          if (sOut) sOut.textContent = String(Math.round(n));
+        }
+        if (sSlider) {
+          sSlider.addEventListener("input", (e) => {
+            updateSharpMemoryDisplay(e.target.value);
+            checkDirty();
+          });
+          updateSharpMemoryDisplay(sSlider.value || 512);
+        }
+        // テンプレートセレクターの配線
+        const templateSelect = byId("IMAGE_TEMPLATE");
+        const templates = {
+          smallest: { PHOTO_SIZE: "640", DEFAULT_QUALITY: "10", IMAGE_MODE: "3" },
+          small: { PHOTO_SIZE: "720", DEFAULT_QUALITY: "30", IMAGE_MODE: "1" },
+          medium: { PHOTO_SIZE: "1040", DEFAULT_QUALITY: "50", IMAGE_MODE: "2" },
+          large: { PHOTO_SIZE: "1440", DEFAULT_QUALITY: "70", IMAGE_MODE: "3" },
+          hq: { PHOTO_SIZE: "2400", DEFAULT_QUALITY: "85", IMAGE_MODE: "3" },
+        };
+        if (templateSelect) {
+          templateSelect.addEventListener("change", (ev) => {
+            const v = ev.target.value;
+            if (!v) return; // 選択をクリアした場合は何もしない
+            const t = templates[v];
+            if (!t) return;
+            // テンプレート値をフォームフィールドに適用
+            for (const k of Object.keys(t)) {
+              const el = byId(k);
+              if (!el) continue;
+              el.value = t[k];
+            }
+            // プログラム的な変更はすべてのブラウザで input/change イベントを発火しないため、
+            // UI 専用の表示（スライダー出力）を手動で更新
+            try {
+              if (typeof updateQualityDisplay === "function" && qSlider) updateQualityDisplay(qSlider.value);
+            } catch (e) {}
+            try {
+              if (typeof updatePhotoSizeDisplay === "function" && pSlider) updatePhotoSizeDisplay(pSlider.value);
+            } catch (e) {}
+            try {
+              if (typeof updateWebpEffortDisplay === "function" && eSlider) updateWebpEffortDisplay(eSlider.value);
+            } catch (e) {}
+            try {
+              if (typeof updateWebpEffortFastDisplay === "function" && efSlider) updateWebpEffortFastDisplay(efSlider.value);
+            } catch (e) {}
+            try {
+              if (typeof updateCompressionDisplay === "function" && compSlider) updateCompressionDisplay(compSlider.value);
+            } catch (e) {}
+            // プログラム的に値が変更されたため、未保存状態を再チェック
+            try {
+              checkDirty();
+            } catch (e) {}
+          });
+        }
+
+        // IMAGE_MODE の変更に応じて WEBP_EFFORT 行の有効/無効を切り替える（IMAGE_CONVERSION_ENABLEDが有効な場合のみ）
+        try {
+          const imgConvFlag = byId("IMAGE_CONVERSION_ENABLED");
+          const imgModeEl = byId("IMAGE_MODE");
+          const webpRow = byId("WEBP_EFFORT") ? byId("WEBP_EFFORT").closest(".row") : null;
+          const webpFastRow = byId("WEBP_EFFORT_FAST") ? byId("WEBP_EFFORT_FAST").closest(".row") : null;
+          const toggleWebpRows = () => {
+            if (!imgModeEl || !webpRow || !webpFastRow || !imgConvFlag || !imgConvFlag.checked) return;
+            if (String(imgModeEl.value) === "1") {
+              webpRow.classList.add("hidden");
+              // webpRow.classList.add('disabled');
+              webpFastRow.classList.remove("hidden");
+              // webpFastRow.classList.remove('disabled');
+            } else {
+              webpRow.classList.remove("hidden");
+              // webpRow.classList.remove('disabled');
+              webpFastRow.classList.add("hidden");
+              // webpFastRow.classList.add('disabled');
+            }
+          };
+          imgModeEl.addEventListener("change", () => {
+            try {
+              toggleWebpRows();
+              checkDirty();
+            } catch (e) {}
+          });
+          // 初期状態
+          toggleWebpRows();
+        } catch (e) {}
+
+        // RATE_LIMIT_ENABLED の切替でレート制限項目を有効/無効化
+        try {
+          const rateFlag = byId("RATE_LIMIT_ENABLED");
+          const rReq = byId("RATE_LIMIT_REQUESTS") ? byId("RATE_LIMIT_REQUESTS").closest(".row") : null;
+          const rWin = byId("RATE_LIMIT_WINDOW_MS") ? byId("RATE_LIMIT_WINDOW_MS").closest(".row") : null;
+          const rQueue = byId("RATE_LIMIT_QUEUE_SIZE") ? byId("RATE_LIMIT_QUEUE_SIZE").closest(".row") : null;
+          const toggleRateRows = () => {
+            if (!rateFlag) return;
+            const disable = !rateFlag.checked;
+            [rReq, rWin, rQueue].forEach((r) => {
+              if (!r) return;
+              if (disable) {
+                r.classList.add("hidden"); /* r.classList.add('disabled'); */
+              } else {
+                r.classList.remove("hidden"); /* r.classList.remove('disabled'); */
+              }
+            });
+          };
+          if (rateFlag) {
+            rateFlag.addEventListener("change", () => {
+              try {
+                toggleRateRows();
+                checkDirty();
+              } catch (e) {}
+            });
+            toggleRateRows();
+          }
+        } catch (e) {}
+
+        // RESTART_ENABLED の切替で再起動時刻入力を有効/無効化
+        try {
+          const restartFlag = byId("RESTART_ENABLED");
+          const restartTimeRow = byId("RESTART_TIME") ? byId("RESTART_TIME").closest(".row") : null;
+          const toggleRestart = () => {
+            if (!restartFlag || !restartTimeRow) return;
+            if (restartFlag.checked) {
+              restartTimeRow.classList.remove("hidden");
+              // restartTimeRow.classList.remove('disabled');
+            } else {
+              restartTimeRow.classList.add("hidden");
+              // restartTimeRow.classList.add('disabled');
+            }
+          };
+          if (restartFlag) {
+            restartFlag.addEventListener("change", () => {
+              try {
+                toggleRestart();
+                checkDirty();
+              } catch (e) {}
+            });
+            toggleRestart();
+          }
+        } catch (e) {}
+
+        // IMAGE_CONVERSION_ENABLED の切替で画像変換関連項目を有効/無効化
+        try {
+          const imgConvFlag = byId("IMAGE_CONVERSION_ENABLED");
+          const imgModeEl = byId("IMAGE_MODE");
+          const webpDetailedFlag = byId("WEBP_DETAILED_ENABLED");
+          const imgTemplateRow = byId("image-template-row");
+          const photoSizeRow = byId("photo-size-row");
+          const defaultQualityRow = byId("default-quality-row");
+          const imageModeRow = byId("image-mode-row");
+          const webpEffortRow = byId("webp-effort-row");
+          const webpEffortFastRow = byId("webp-effort-fast-row");
+          const webpDetailedEnabledRow = byId("webp-detailed-enabled-row");
+          const webpPresetRow = byId("webp-detailed-preset-row");
+          const webpReductionRow = byId("webp-detailed-reduction-row");
+          const toggleImageConversionRows = () => {
+            if (!imgConvFlag) return;
+            const disable = !imgConvFlag.checked;
+            [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach((r) => {
+              if (!r) return;
+              if (disable) {
+                r.classList.add("hidden");
+                /* r.classList.add('disabled'); */
+              } else {
+                r.classList.remove("hidden");
+                /* r.classList.remove('disabled'); */
+              }
+            });
+            // IMAGE_CONVERSION_ENABLEDが有効になった場合、IMAGE_MODEに応じてWEBP_EFFORTとWEBP_EFFORT_FASTの表示を切り替える
+            if (!disable && imgModeEl && webpEffortRow && webpEffortFastRow) {
+              if (String(imgModeEl.value) === "1") {
+                webpEffortRow.classList.add("hidden");
+                webpEffortFastRow.classList.remove("hidden");
+              } else {
+                webpEffortRow.classList.remove("hidden");
+                webpEffortFastRow.classList.add("hidden");
+              }
+            }
+            // IMAGE_CONVERSION_ENABLEDが有効になった場合、WEBP_DETAILED_ENABLEDに応じて詳細設定項目の表示を切り替える
+            if (!disable && webpDetailedFlag && webpPresetRow && webpReductionRow) {
+              // さらに深い階層の子項目インデント
+              try {
+                [webpPresetRow, webpReductionRow].forEach((r) => {
+                  if (r) {
+                    r.classList.remove("child");
+                    r.classList.add("child-2");
+                  }
+                });
+              } catch (e) {}
+              const detailedDisable = !webpDetailedFlag.checked;
+              [webpPresetRow, webpReductionRow].forEach((r) => {
+                if (!r) return;
+                if (detailedDisable) {
+                  r.classList.add("hidden");
+                } else {
+                  r.classList.remove("hidden");
+                }
+              });
+            }
+          };
+          if (imgConvFlag) {
+            imgConvFlag.addEventListener("change", () => {
+              try {
+                toggleImageConversionRows();
+                checkDirty();
+              } catch (e) {}
+            });
+            toggleImageConversionRows();
+          }
+        } catch (e) {}
+
+        // WEBP_DETAILED_ENABLED の切替で詳細設定項目を有効/無効化（IMAGE_CONVERSION_ENABLEDが有効な場合のみ）
+        try {
+          const imgConvFlag = byId("IMAGE_CONVERSION_ENABLED");
+          const webpDetailedFlag = byId("WEBP_DETAILED_ENABLED");
+          const webpPresetRow = byId("webp-detailed-preset-row");
+          const webpReductionRow = byId("webp-detailed-reduction-row");
+          const toggleWebpDetailedRows = () => {
+            if (!webpDetailedFlag || !imgConvFlag || !imgConvFlag.checked) return;
+            // さらに深い階層の子項目インデント
+            try {
+              [webpPresetRow, webpReductionRow].forEach((r) => {
+                if (r) {
+                  r.classList.remove("child");
+                  r.classList.add("child-2");
+                }
+              });
+            } catch (e) {}
+            const disable = !webpDetailedFlag.checked;
+            [webpPresetRow, webpReductionRow].forEach((r) => {
+              if (!r) return;
+              if (disable) {
+                r.classList.add("hidden");
+                /* r.classList.add('disabled'); */
+              } else {
+                r.classList.remove("hidden");
+                /* r.classList.remove('disabled'); */
+              }
+            });
+          };
+          if (webpDetailedFlag) {
+            webpDetailedFlag.addEventListener("change", () => {
+              try {
+                toggleWebpDetailedRows();
+                checkDirty();
+              } catch (e) {}
+            });
+            toggleWebpDetailedRows();
+          }
+        } catch (e) {}
+
+        // 固定バーボタンの配線（存在する場合）
+        const btnSaveFixed = byId("btnSaveFixed");
+        const btnLoadFixed = byId("btnLoadFixed");
+        if (btnSaveFixed) btnSaveFixed.addEventListener("click", () => saveConfig());
+        if (btnLoadFixed) btnLoadFixed.addEventListener("click", () => loadConfig());
+
+        // チェックボックス行をアクセシブルな視覚的トグルスイッチに変換
+        try {
+          const checkboxRows = document.querySelectorAll(".checkbox-row");
+          checkboxRows.forEach((row) => {
+            const cb = row.querySelector('input[type="checkbox"]');
+            if (!cb) return;
+            // 二重挿入を回避
+            if (row.querySelector(".switch")) return;
+            const sw = document.createElement("span");
+            sw.className = "switch" + (cb.checked ? " on" : "");
+            sw.setAttribute("tabindex", "0");
+            sw.setAttribute("role", "switch");
+            sw.setAttribute("aria-checked", cb.checked ? "true" : "false");
+            // スイッチがクリックされたとき、チェックボックスをトグルしてイベントを発火
+            const toggle = () => {
+              cb.checked = !cb.checked;
+              // 視覚的表示を更新
+              if (cb.checked) sw.classList.add("on");
+              else sw.classList.remove("on");
+              sw.setAttribute("aria-checked", cb.checked ? "true" : "false");
+              // 既存のリスナーに change イベントを発火
+              try {
+                cb.dispatchEvent(new Event("change", { bubbles: true }));
+              } catch (e) {}
+              try {
+                checkDirty();
+              } catch (e) {}
+            };
+            sw.addEventListener("click", (e) => {
+              e.preventDefault();
+              toggle();
+            });
+            sw.addEventListener("keydown", (e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                toggle();
+              }
+            });
+            // チェックボックスが外部で変更された場合、スイッチを同期
+            cb.addEventListener("change", () => {
+              if (cb.checked) sw.classList.add("on");
+              else sw.classList.remove("on");
+              sw.setAttribute("aria-checked", cb.checked ? "true" : "false");
+            });
+            // ラベルの後または行の最後にスイッチを追加
+            row.appendChild(sw);
+          });
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>

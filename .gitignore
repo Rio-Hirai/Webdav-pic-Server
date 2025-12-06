@@ -9,3 +9,10 @@ comp.py
 logs/
 pic/
 test_storage
+
+# SSL証明書（機密情報のため除外）
+ssl/
+*.crt
+*.key
+*.pem
+*.csr

@@ -572,6 +572,8 @@ const getEmergencyResetWindow = () =>
 // サーバー設定読み込み関数
 const getServerPort = () => getDynamicConfig("PORT", 1901); // サーバーポート
 const getServerRootPath = () => getDynamicConfig("ROOT_PATH", "Z:/書籍"); // サーバールートパス
+const getSSLCertPath = () => getDynamicConfig("SSL_CERT_PATH", ""); // SSL証明書パス
+const getSSLKeyPath = () => getDynamicConfig("SSL_KEY_PATH", ""); // SSL秘密鍵パス
 
 // 画像処理モード設定読み込み関数
 const getImageMode = () => getDynamicConfig("IMAGE_MODE", 2); // 画像処理モード（1=高速処理、2=バランス処理、3=高圧縮処理）
@@ -617,6 +619,8 @@ module.exports = {
   getEmergencyResetWindow, // 時間窓（ミリ秒）
   getServerPort, // サーバーポート
   getServerRootPath, // サーバールートパス
+  getSSLCertPath, // SSL証明書パス
+  getSSLKeyPath, // SSL秘密鍵パス
   getImageMode, // 画像処理モード
   getWebpEffort, // WebP effort 設定 (0-9)
   getWebpEffortFast, // WebP effort fast 設定 (0-9)

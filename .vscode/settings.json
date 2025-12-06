@@ -2,6 +2,8 @@
     "cSpell.words": [
         "Authentification",
         "buildtools",
+        "certbot",
+        "certonly",
         "choco",
         "Conv",
         "cpus",
@@ -9,9 +11,11 @@
         "ENOENT",
         "EXIF",
         "findstr",
+        "fullchain",
         "iltorb",
         "Imagemagik",
         "Kaku",
+        "letsencrypt",
         "libde",
         "libvips",
         "magick",
@@ -21,16 +25,19 @@
         "opendir",
         "Owlfiles",
         "pgrep",
+        "privkey",
         "PROPFIND",
         "PROPPATCH",
         "Readdle",
         "Ryzen",
+        "signkey",
         "startbg",
         "stopall",
         "SUBPIC",
         "sysinfo",
         "taskkill",
         "webdav",
-        "WEBP"
+        "WEBP",
+        "yourdomain"
     ]
 }

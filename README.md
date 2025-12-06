@@ -346,6 +346,140 @@ http://localhost:1900/path/to/large_image.jpg
 
 ## 設定
 
+### HTTPS/SSL証明書の設定
+
+HTTPSモードでサーバーを起動するには、SSL証明書と秘密鍵ファイルが必要です。
+
+#### 方法1: 自己署名証明書（開発・テスト用）
+
+ローカル環境や開発環境で使用する場合は、自己署名証明書を生成できます。
+
+**Windows (OpenSSLを使用):**
+
+1. OpenSSLをインストール（未インストールの場合）:
+   ```bash
+   # Chocolateyを使用する場合
+   choco install openssl
+
+   # または公式サイトからダウンロード
+   # https://slproweb.com/products/Win32OpenSSL.html
+   ```
+
+2. 証明書ディレクトリを作成:
+   ```bash
+   mkdir ssl
+   cd ssl
+   ```
+
+3. 秘密鍵を生成:
+   ```bash
+   openssl genrsa -out private.key 2048
+   ```
+
+4. 証明書署名要求(CSR)を生成:
+   ```bash
+   openssl req -new -key private.key -out certificate.csr
+   ```
+   - プロンプトで情報を入力（Common NameにはサーバーのIPアドレスまたはホスト名を入力）
+
+5. 自己署名証明書を生成:
+   ```bash
+   openssl x509 -req -days 365 -in certificate.csr -signkey private.key -out certificate.crt
+   ```
+
+6. `config.txt`に設定を追加:
+   ```txt
+   SSL_CERT_PATH=ssl/certificate.crt
+   SSL_KEY_PATH=ssl/private.key
+   ```
+
+**注意**: 自己署名証明書はブラウザで警告が表示されます。開発環境でのみ使用してください。
+
+#### 方法2: mkcert（開発用、簡単）
+
+mkcertを使用すると、ローカル開発用の信頼された証明書を簡単に生成できます。
+
+1. mkcertをインストール:
+   ```bash
+   # Chocolateyを使用する場合
+   choco install mkcert
+   
+   # またはGitHubからダウンロード
+   # https://github.com/FiloSottile/mkcert/releases
+   ```
+
+2. ローカルCAをインストール:
+   ```bash
+   mkcert -install
+   ```
+
+3. 証明書を生成:
+   ```bash
+   mkdir ssl
+   cd ssl
+   mkcert localhost 127.0.0.1 ::1
+   ```
+   これで`localhost+2.pem`（証明書）と`localhost+2-key.pem`（秘密鍵）が生成されます。
+
+4. `config.txt`に設定を追加:
+   ```txt
+   SSL_CERT_PATH=ssl/localhost+2.pem
+   SSL_KEY_PATH=ssl/localhost+2-key.pem
+   ```
+
+#### 方法3: Let's Encrypt（本番環境用）
+
+本番環境で使用する場合は、Let's Encryptの無料証明書を使用できます。
+
+1. Certbotをインストール:
+   ```bash
+   # Windows (WSLを使用する場合)
+   sudo apt-get update
+   sudo apt-get install certbot
+   ```
+
+2. 証明書を取得:
+   ```bash
+   sudo certbot certonly --standalone -d yourdomain.com
+   ```
+
+3. 証明書ファイルの場所を確認:
+   - 証明書: `/etc/letsencrypt/live/yourdomain.com/fullchain.pem`
+   - 秘密鍵: `/etc/letsencrypt/live/yourdomain.com/privkey.pem`
+
+4. `config.txt`に設定を追加:
+   ```txt
+   SSL_CERT_PATH=/etc/letsencrypt/live/yourdomain.com/fullchain.pem
+   SSL_KEY_PATH=/etc/letsencrypt/live/yourdomain.com/privkey.pem
+   ```
+
+**注意**: Let's Encryptの証明書は90日で期限切れになるため、自動更新の設定が必要です。
+
+#### 証明書ファイルの配置
+
+証明書ファイルは以下のように配置することを推奨します:
+
+```
+プロジェクトルート/
+├── ssl/
+│   ├── certificate.crt  (または fullchain.pem)
+│   └── private.key     (または privkey.pem)
+├── config.txt
+└── main.js
+```
+
+#### 設定例
+
+`config.txt`に以下のように設定します:
+
+```txt
+# SSL/HTTPS設定
+SSL_CERT_PATH=ssl/certificate.crt
+SSL_KEY_PATH=ssl/private.key
+```
+
+証明書が設定されていない場合、サーバーはHTTPモードで起動します（後方互換性）。
+
 ### 設定画面での設定変更
 
 **Web UI 設定画面**: <http://localhost:1900/setting>

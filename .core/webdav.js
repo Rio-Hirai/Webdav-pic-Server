@@ -2,6 +2,7 @@
 const fs = require("fs"); // ファイルシステム操作 - 同期/非同期ファイルI/O、ディレクトリ操作、opendirSync等のストリーミングAPI
 const path = require("path"); // パス操作 - クロスプラットフォーム対応のパス解決、正規化、セキュリティチェック用
 const http = require("http"); // HTTPサーバー - 低レベルHTTPサーバー実装、Keep-Alive、タイムアウト設定
+const https = require("https"); // HTTPSサーバー - SSL/TLS暗号化通信対応
 const crypto = require("crypto"); // 暗号化・ハッシュ生成 - MD5/SHA256等のハッシュ関数、キャッシュキー生成用
 const os = require("os"); // OS情報取得 - CPU数、メモリ情報、プラットフォーム判定、並列度最適化用
 const stream = require("stream"); // ストリーム処理 - PassThrough、pipeline等のストリーム操作、メモリ効率化
@@ -26,6 +27,8 @@ const {
   getCacheTTL, // キャッシュTTL - キャッシュの有効期限
   getServerPort, // サーバーポート - WebDAVサーバーのポート番号
   getServerRootPath, // サーバールートパス - WebDAVサーバーのルートディレクトリパス
+  getSSLCertPath, // SSL証明書パス - SSL証明書ファイルのパス
+  getSSLKeyPath, // SSL秘密鍵パス - SSL秘密鍵ファイルのパス
 } = require("./config"); // 設定管理モジュール
 
 // 画像変換モジュール
@@ -444,16 +447,60 @@ function startWebDAV(activeCacheDir) {
     };
 
     /**
-     * HTTPサーバーの作成
-     * 画像変換機能付きのHTTPサーバーを起動し、WebDAVリクエストと画像変換リクエストを処理
+     * SSL証明書の読み込み
+     * 証明書と秘密鍵ファイルを読み込んでHTTPSサーバー用のオプションを生成
+     *
+     * @returns {Object|null} SSLオプション（証明書が設定されている場合）、null（証明書未設定の場合）
+     */
+    const loadSSLOptions = () => {
+      const certPath = getSSLCertPath();
+      const keyPath = getSSLKeyPath();
+
+      // 証明書が設定されていない場合はHTTPのまま
+      if (!certPath || !keyPath || certPath.trim() === "" || keyPath.trim() === "") {
+        return null;
+      }
+
+      try {
+        // 証明書ファイルの存在確認
+        if (!fs.existsSync(certPath)) {
+          logger.warn(`[SSL] 証明書ファイルが見つかりません: ${certPath}`);
+          return null;
+        }
+        if (!fs.existsSync(keyPath)) {
+          logger.warn(`[SSL] 秘密鍵ファイルが見つかりません: ${keyPath}`);
+          return null;
+        }
+
+        // 証明書と秘密鍵を読み込む
+        const cert = fs.readFileSync(certPath, "utf8");
+        const key = fs.readFileSync(keyPath, "utf8");
+
+        logger.info(`[SSL] 証明書を読み込みました: ${certPath}`);
+        return { cert, key };
+      } catch (e) {
+        logger.error(`[SSL] 証明書の読み込みに失敗しました: ${e.message}`);
+        return null;
+      }
+    };
+
+    const sslOptions = loadSSLOptions();
+    const useHTTPS = sslOptions !== null;
+
+    /**
+     * HTTP/HTTPSサーバーの作成
+     * 画像変換機能付きのHTTP/HTTPSサーバーを起動し、WebDAVリクエストと画像変換リクエストを処理
      *
      * 技術的詳細:
      * - ハイブリッド処理: WebDAVと画像変換の両方を単一サーバーで処理
+     * - SSL/TLS対応: 証明書が設定されている場合はHTTPS、未設定の場合はHTTP
      * - 拡張子判定: 画像ファイルの自動検出と変換処理の分岐
      * - ストリーミング: 大容量ファイルの効率的な転送
      * - エラーハンドリング: 各処理段階での適切なエラー応答
      */
-    const httpServer = http.createServer(async (req, res) => {
+    const httpServer = (useHTTPS ? https : http).createServer(
+      useHTTPS ? sslOptions : undefined,
+      async (req, res) => {
       // EventEmitterメモリリーク防止
       res.setMaxListeners(20); // 最大リスナー数を20に設定
 
@@ -1209,7 +1256,7 @@ function startWebDAV(activeCacheDir) {
     httpServer.headersTimeout = 65000; // ヘッダータイムアウト時間を65秒に設定
 
     /**
-     * HTTPサーバーのエラーハンドリング
+     * HTTP/HTTPSサーバーのエラーハンドリング
      * EADDRINUSE等のエラーでクラッシュしないようにエラーイベントを先に登録
      */
     httpServer.on("error", (err) => {
@@ -1218,16 +1265,21 @@ function startWebDAV(activeCacheDir) {
         logger.error(`ポート ${PORT} は既に使用されています。サーバーの起動をスキップします。`); // ポートが既に使用されている場合のエラーログ
       } else {
         // エラーの場合
-        logger.error("HTTP server error", err); // HTTPサーバーエラーログ
+        const serverType = useHTTPS ? "HTTPS" : "HTTP";
+        logger.error(`${serverType} server error`, err); // HTTP/HTTPSサーバーエラーログ
       }
     });
 
     /**
-     * HTTPサーバーの起動
+     * HTTP/HTTPSサーバーの起動
      * 指定されたポートでサーバーを起動し、起動完了をログ出力
      */
     httpServer.listen(PORT, () => {
-      logger.info(`✅ WebDAV 起動: http://localhost:${PORT}/`); // WebDAV起動ログ
+      const protocol = useHTTPS ? "https" : "http";
+      logger.info(`✅ WebDAV 起動: ${protocol}://localhost:${PORT}/`); // WebDAV起動ログ
+      if (useHTTPS) {
+        logger.info(`[SSL] HTTPSモードで起動しました`); // HTTPS起動ログ
+      }
       logger.info(`[INFO] キャッシュDir=${activeCacheDir || "無効"} / MAX_LIST=${getMaxList()} / Photo_Size=${getPhotoSize() ?? "オリジナル"}`); // キャッシュディレクトリログ
       logger.info(`[INFO] 圧縮機能=${getCompressionEnabled() ? "有効" : "無効"} / 圧縮閾値=${(getCompressionThreshold() * 100).toFixed(1)}%`); // 圧縮機能ログ
     });

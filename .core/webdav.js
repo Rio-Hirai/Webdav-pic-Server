@@ -138,10 +138,12 @@ function startWebDAV(activeCacheDir) {
       names = origReaddirSync(dir, opts).slice(0, getMaxList()); // MAX_LIST件までに制限
     }
 
-    // キャッシュ保存（エラーは無視）
+    // キャッシュ保存（エラーは警告ログを出力）
     try {
       dirCache.set(dir, names); // キャッシュに保存
-    } catch (e) {} // キャッシュ保存エラーは無視
+    } catch (e) {
+      logger.warn(`[キャッシュ保存エラー] readdirSync ${dir}: ${e.message}`);
+    }
 
     return names; // ディレクトリ内のファイル名配列を返す
   }
@@ -160,10 +162,12 @@ function startWebDAV(activeCacheDir) {
 
     try {
       const stat = origStatSync(p, opts); // 元のstatSyncを呼び出し
-      // キャッシュ保存（エラーは無視）
+      // キャッシュ保存（エラーは警告ログを出力）
       try {
         statCache.set(p, stat); // キャッシュに保存
-      } catch (e) {} // キャッシュ保存エラーは無視
+      } catch (e) {
+        logger.warn(`[キャッシュ保存エラー] statSync ${p}: ${e.message}`);
+      }
       return stat; // ファイル統計情報を返す
     } catch {
       // ファイルが存在しない場合のデフォルトオブジェクト
@@ -202,10 +206,12 @@ function startWebDAV(activeCacheDir) {
       names = await origReaddirP(dir, opts); // 非同期readdirにフォールバック
     }
 
-    // キャッシュ保存（エラーは無視）
+    // キャッシュ保存（エラーは警告ログを出力）
     try {
       dirCache.set(dir, names); // キャッシュに保存
-    } catch (e) {} // キャッシュ保存エラーは無視
+    } catch (e) {
+      logger.warn(`[キャッシュ保存エラー] readdir ${dir}: ${e.message}`);
+    }
 
     return names; // ディレクトリ内のファイル名配列を返す
   }
@@ -224,10 +230,12 @@ function startWebDAV(activeCacheDir) {
 
     try {
       const stat = await origStatP(p, opts); // 元のstatを呼び出し
-      // キャッシュ保存（エラーは無視）
+      // キャッシュ保存（エラーは警告ログを出力）
       try {
         statCache.set(p, stat); // キャッシュに保存
-      } catch (e) {}
+      } catch (e) {
+        logger.warn(`[キャッシュ保存エラー] stat ${p}: ${e.message}`);
+      }
       return stat; // ファイル統計情報を返す
     } catch {
       // ファイルが存在しない場合のデフォルトオブジェクト
@@ -322,7 +330,7 @@ function startWebDAV(activeCacheDir) {
             return callback(null, limited); // 制限後の配列を返す
           } catch (e) {
             // キャッシュ保存エラーの場合
-            // キャッシュ保存エラーは無視
+            logger.warn(`[キャッシュ保存エラー] _readdir ${path}: ${e.message}`);
           }
         } // エラーがなく配列の場合はMAX_LIST件までに制限
         callback(err, names); // エラーまたはキャッシュ保存失敗時はそのまま返す
@@ -351,7 +359,7 @@ function startWebDAV(activeCacheDir) {
           try {
             this.statCache.set(path, stat); // キャッシュに保存
           } catch (e) {
-            // キャッシュ保存エラーは無視
+            logger.warn(`[キャッシュ保存エラー] _stat ${path}: ${e.message}`);
           }
         }
         callback(err, stat); // エラーまたはキャッシュ保存失敗時はそのまま返す
@@ -374,17 +382,9 @@ function startWebDAV(activeCacheDir) {
 
     /**
      * HTTPサーバー関連の初期化
-     * fsのラッパーをインストールして、画像変換のin-flight管理等を用意
-     * グローバルなfs関数をキャッシュ機能付きのラッパーに置き換える
+     * 注意: グローバルなfs関数の置き換えは副作用を避けるため削除
+     * CachedFileSystemクラス内でラッパー関数を使用することで、グローバル変数の副作用を回避
      */
-    try {
-      fs.readdirSync = readdirSyncWrap;
-      fs.statSync = statSyncWrap;
-      fs.promises.readdir = readdirPWrap;
-      fs.promises.stat = statPWrap;
-    } catch (e) {
-      logger.warn("[warn] failed to install fs wrappers", e);
-    }
 
     // スタック処理システムでは複雑なin-flight管理は不要（順次処理のため）
 

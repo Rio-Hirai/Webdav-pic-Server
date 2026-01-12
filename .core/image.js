@@ -32,6 +32,17 @@ const {
 } = require("./config"); // 設定値を取得
 const { recordImageTransfer } = require("./stats"); // 転送統計
 
+// ImageMagick処理共通ヘルパー
+const {
+  sendOriginalImage,
+  spawnImageMagick,
+  setupImageMagickErrorHandling,
+  handlePrematureClose,
+  buildResizeOptions,
+  buildWebpOptions,
+  pipeline: helperPipeline,
+} = require("./image-magick-helper");
+
 const PassThrough = stream.PassThrough; // パススルー
 const pipeline = promisify(stream.pipeline); // パイプライン
 
@@ -380,81 +391,42 @@ async function convertAndRespond({
         if (tmpPath) fs.unlink(tmpPath, () => {}); // 存在しない場合は無視
 
         /**
-         * ImageMagickコマンドライン引数の構築
+         * ImageMagickプロセスの起動（共通ヘルパーを使用）
          * - resize: Photo_Sizeが指定されている場合のみリサイズ
          * - quality: WebP品質設定
          * - webp:-: 標準出力にWebP形式で出力
-         *
-         * 技術的詳細:
-         * - spawn使用: ストリーミング処理によるメモリ効率化
-         * - 標準出力: パイプによるデータ転送
-         * - エラーハンドリング: プロセス失敗時の適切な処理
-         * - リソース管理: プロセス終了時の自動クリーンアップ
          */
-        const resizeOpt = Photo_Size
-          ? ["-resize", `${Photo_Size}x${Photo_Size}`]
-          : []; // リサイズオプション
-        const magick = spawn(MAGICK_CMD, [
-          fullPath,
-          ...resizeOpt,
-          "-quality",
-          `${quality}`,
-          "webp:-",
-        ]); // ImageMagickプロセスを起動
+        (async () => {
+          const imageMode = getImageMode();
+          const isFast = imageMode === 1;
+          const { magick } = await spawnImageMagick({
+            fullPath,
+            Photo_Size,
+            quality,
+            isFast,
+            useAdvancedOptions: false, // フォールバック処理ではシンプルなオプションを使用
+          });
 
-        // ImageMagickプロセスのエラーハンドリング
-        magick.on("error", (err) => {
-          logger.error(`[ImageMagick変換失敗] ${fullPath}: ${err}`); // エラーログを出力
-
-          // ImageMagick失敗時は元画像を直接送信
-          logger.info(`[ImageMagick失敗→元画像送信] ${displayPath}`);
+          // ImageMagickプロセスのエラーハンドリング（共通ヘルパーを使用）
+          setupImageMagickErrorHandling({
+            magick,
+            fullPath,
+            displayPath,
+            res,
+            originalSize,
+            statsRecorder,
+            resolve,
+            reject,
+          });
 
           // HTTPヘッダー設定（まだ送信されていない場合）
           if (!res.headersSent) {
-            // 元画像のContent-Typeを設定
-            const fileExt = path.extname(fullPath).toLowerCase();
-            let contentType = "application/octet-stream";
-            if (fileExt === ".jpg" || fileExt === ".jpeg")
-              contentType = "image/jpeg";
-            else if (fileExt === ".png") contentType = "image/png";
-            else if (fileExt === ".gif") contentType = "image/gif";
-            else if (fileExt === ".webp") contentType = "image/webp";
-            else if (fileExt === ".bmp") contentType = "image/bmp";
-            else if (fileExt === ".tiff" || fileExt === ".tif")
-              contentType = "image/tiff";
-
-            res.setHeader("Content-Type", contentType);
+            res.setHeader("Content-Type", "image/webp"); // WebP画像のMIMEタイプ
           }
 
-          // 元画像ファイルを直接ストリーミング
-          const fileStream = fs.createReadStream(fullPath);
-          fileStream.pipe(res);
-
-          fileStream.on("error", (streamErr) => {
-            logger.error(
-              `[元画像送信失敗] ${displayPath}: ${streamErr.message}`
-            );
-            if (!res.headersSent) res.writeHead(500);
-            res.end("Failed to read original image");
-            return reject(streamErr);
-          });
-
-          fileStream.on("end", () => {
-            logger.info(`[変換完了(元画像)] ${displayPath}`);
-            statsRecorder.record(originalSize);
-            res.end();
-            return resolve();
-          });
-        });
-
-        // HTTPヘッダー設定（まだ送信されていない場合）
-        if (!res.headersSent) {
-          res.setHeader("Content-Type", "image/webp"); // WebP画像のMIMEタイプ
-        }
-
-        if (tmpPath) {
-          // キャッシュファイルへの書き込み処理（権限チェック付き）
-          try {
+          if (tmpPath) {
+            // キャッシュファイルへの書き込み処理（権限チェック付き）
+            try {
             // 親ディレクトリの存在確認と作成
             const tmpDir = path.dirname(tmpPath);
             if (!fs.existsSync(tmpDir)) {
@@ -465,21 +437,7 @@ async function convertAndRespond({
 
             // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
             pipeline(magick.stdout, writeStream).catch((e) => {
-              // Premature closeエラーは頻発するため、ログレベルを調整
-              if (e.message && e.message.includes("Premature close")) {
-                logger.info(`[magick->tmp pipeline] ${e.message}`);
-                // Premature closeの場合はImageMagickプロセスを終了
-                if (magick && !magick.killed) {
-                  try {
-                    magick.kill("SIGTERM");
-                    logger.info(
-                      `[ImageMagick強制終了(Premature close)] ${displayPath}`
-                    );
-                  } catch (killErr) {
-                    // プロセス終了エラーは無視
-                  }
-                }
-              } else {
+              if (!handlePrematureClose(e, magick, displayPath, "magick->tmp pipeline")) {
                 logger.error(`[magick->tmp pipeline error] ${e.message}`);
               }
               // キャッシュ書き込み失敗時はキャッシュなしで続行
@@ -489,47 +447,17 @@ async function convertAndRespond({
             // ImageMagickの標準出力エラーハンドリング
             magick.stdout.on("error", (err) => {
               logger.error(`[magick->res pipeline error] ${err.message}`);
-
-              // ImageMagickパイプラインエラー時は元画像を送信
               logger.info(
                 `[ImageMagickパイプラインエラー→元画像送信] ${displayPath}`
               );
-
-              // HTTPヘッダー設定（まだ送信されていない場合）
-              if (!res.headersSent) {
-                // 元画像のContent-Typeを設定
-                const fileExt = path.extname(fullPath).toLowerCase();
-                let contentType = "application/octet-stream";
-                if (fileExt === ".jpg" || fileExt === ".jpeg")
-                  contentType = "image/jpeg";
-                else if (fileExt === ".png") contentType = "image/png";
-                else if (fileExt === ".gif") contentType = "image/gif";
-                else if (fileExt === ".webp") contentType = "image/webp";
-                else if (fileExt === ".bmp") contentType = "image/bmp";
-                else if (fileExt === ".tiff" || fileExt === ".tif")
-                  contentType = "image/tiff";
-
-                res.setHeader("Content-Type", contentType);
-              }
-
-              // 元画像ファイルを直接ストリーミング
-              const fileStream = fs.createReadStream(fullPath);
-              fileStream.pipe(res);
-
-              fileStream.on("error", (streamErr) => {
-                logger.error(
-                  `[元画像送信失敗] ${displayPath}: ${streamErr.message}`
-                );
-                if (!res.headersSent) res.writeHead(500);
-                res.end("Failed to read original image");
-                return reject(streamErr);
-              });
-
-              fileStream.on("end", () => {
-                logger.info(`[変換完了(元画像)] ${displayPath}`);
-                statsRecorder.record(originalSize);
-                res.end();
-                return resolve();
+              sendOriginalImage({
+                fullPath,
+                displayPath,
+                res,
+                originalSize,
+                statsRecorder,
+                resolve,
+                reject,
               });
             });
 
@@ -558,17 +486,7 @@ async function convertAndRespond({
               }
               // Premature closeの場合は強制的にresolveを呼ぶ
               logger.warn(`[Premature close検出] ${displayPath} - 強制完了`);
-
-              // ImageMagickプロセスを強制終了
-              if (magick && !magick.killed) {
-                try {
-                  magick.kill("SIGTERM");
-                  logger.info(`[ImageMagick強制終了] ${displayPath}`);
-                } catch (e) {
-                  // プロセス終了エラーは無視
-                }
-              }
-
+              handlePrematureClose(new Error("Premature close"), magick, displayPath, "response close");
               return resolve();
             });
           } catch (writeError) {
@@ -577,168 +495,82 @@ async function convertAndRespond({
             );
             // キャッシュなしでレスポンス継続
             pipeline(magick.stdout, res).catch((err) => {
-              // Premature closeエラーは頻発するため、ログレベルを調整
-              if (err.message && err.message.includes("Premature close")) {
-                logger.info(`[magick->res pipeline] ${err.message}`);
-                // Premature closeの場合はImageMagickプロセスを終了
-                if (magick && !magick.killed) {
-                  try {
-                    magick.kill("SIGTERM");
-                    logger.info(
-                      `[ImageMagick強制終了(Premature close)] ${displayPath}`
-                    );
-                  } catch (killErr) {
-                    // プロセス終了エラーは無視
-                  }
-                }
-              } else {
+              if (!handlePrematureClose(err, magick, displayPath, "magick->res pipeline")) {
                 logger.error(`[magick->res pipeline error] ${err.message}`);
-
-                // ImageMagickパイプラインエラー時は元画像を送信
                 logger.info(
                   `[ImageMagickパイプラインエラー→元画像送信] ${displayPath}`
                 );
-
-                // HTTPヘッダー設定（まだ送信されていない場合）
-                if (!res.headersSent) {
-                  // 元画像のContent-Typeを設定
-                  const fileExt = path.extname(fullPath).toLowerCase();
-                  let contentType = "application/octet-stream";
-                  if (fileExt === ".jpg" || fileExt === ".jpeg")
-                    contentType = "image/jpeg";
-                  else if (fileExt === ".png") contentType = "image/png";
-                  else if (fileExt === ".gif") contentType = "image/gif";
-                  else if (fileExt === ".webp") contentType = "image/webp";
-                  else if (fileExt === ".bmp") contentType = "image/bmp";
-                  else if (fileExt === ".tiff" || fileExt === ".tif")
-                    contentType = "image/tiff";
-
-                  res.setHeader("Content-Type", contentType);
-                }
-
-                // 元画像ファイルを直接ストリーミング
-                const fileStream = fs.createReadStream(fullPath);
-                fileStream.pipe(res);
-
-                fileStream.on("error", (streamErr) => {
-                  logger.error(
-                    `[元画像送信失敗] ${displayPath}: ${streamErr.message}`
-                  );
-                  if (!res.headersSent) res.writeHead(500);
-                  res.end("Failed to read original image");
-                  return reject(streamErr);
-                });
-
-                fileStream.on("end", () => {
-                  logger.info(`[変換完了(元画像)] ${displayPath}`);
-                  statsRecorder.record(originalSize);
-                  res.end();
-                  return resolve();
+                sendOriginalImage({
+                  fullPath,
+                  displayPath,
+                  res,
+                  originalSize,
+                  statsRecorder,
+                  resolve,
+                  reject,
                 });
               }
             });
           }
-        } else {
-          // キャッシュなしの場合は直接レスポンスにストリーミング
-          pipeline(magick.stdout, res).catch((e) => {
-            // Premature closeエラーは頻発するため、ログレベルを調整
-            if (e.message && e.message.includes("Premature close")) {
-              logger.info(`[magick->res pipeline] ${e.message}`);
-              // Premature closeの場合はImageMagickプロセスを終了
-              if (magick && !magick.killed) {
-                try {
-                  magick.kill("SIGTERM");
-                  logger.info(
-                    `[ImageMagick強制終了(Premature close)] ${displayPath}`
-                  );
-                } catch (killErr) {
-                  // プロセス終了エラーは無視
-                }
-              }
-            } else {
-              logger.error(`[magick->res pipeline error] ${e.message}`);
-
-              // ImageMagickパイプラインエラー時は元画像を送信
-              logger.info(
-                `[ImageMagickパイプラインエラー→元画像送信] ${displayPath}`
-              );
-
-              // HTTPヘッダー設定（まだ送信されていない場合）
-              if (!res.headersSent) {
-                // 元画像のContent-Typeを設定
-                const fileExt = path.extname(fullPath).toLowerCase();
-                let contentType = "application/octet-stream";
-                if (fileExt === ".jpg" || fileExt === ".jpeg")
-                  contentType = "image/jpeg";
-                else if (fileExt === ".png") contentType = "image/png";
-                else if (fileExt === ".gif") contentType = "image/gif";
-                else if (fileExt === ".webp") contentType = "image/webp";
-                else if (fileExt === ".bmp") contentType = "image/bmp";
-                else if (fileExt === ".tiff" || fileExt === ".tif")
-                  contentType = "image/tiff";
-
-                res.setHeader("Content-Type", contentType);
-              }
-
-              // 元画像ファイルを直接ストリーミング
-              const fileStream = fs.createReadStream(fullPath);
-              fileStream.pipe(res);
-
-              fileStream.on("error", (streamErr) => {
-                logger.error(
-                  `[元画像送信失敗] ${displayPath}: ${streamErr.message}`
+          } else {
+            // キャッシュなしの場合は直接レスポンスにストリーミング
+            pipeline(magick.stdout, res).catch((e) => {
+              if (!handlePrematureClose(e, magick, displayPath, "magick->res pipeline")) {
+                logger.error(`[magick->res pipeline error] ${e.message}`);
+                logger.info(
+                  `[ImageMagickパイプラインエラー→元画像送信] ${displayPath}`
                 );
-                if (!res.headersSent) res.writeHead(500);
-                res.end("Failed to read original image");
-                return reject(streamErr);
-              });
-
-              fileStream.on("end", () => {
-                logger.info(`[変換完了(元画像)] ${displayPath}`);
-                statsRecorder.record(originalSize);
-                res.end();
-                return resolve();
-              });
-            }
-          }); // レスポンスはパイプラインで自動終了
-        }
-
-        // 変換完了時の処理
-        let magickResponseSize = 0; // ImageMagickレスポンスサイズ
-        magick.stdout.on("data", (chunk) => {
-          magickResponseSize += chunk.length; // レスポンスサイズを累計
-        });
-        magick.stdout.on("end", () => {
-          logger.info(
-            `[変換完了(ImageMagick)] ${displayPath} (サイズ: ${magickResponseSize.toLocaleString()} bytes)`
-          ); // ImageMagick変換完了ログを出力
-          statsRecorder.record(magickResponseSize);
-          res.end(); // レスポンスを終了
-          return resolve(); // 呼び出し元に完了を伝播
-        });
-
-        // Premature closeエラー対策（onErrorFallback内）
-        res.on("close", () => {
-          if (!res.headersSent || res.writableEnded) {
-            // レスポンスが正常に終了した場合は何もしない
-            return;
-          }
-          // Premature closeの場合は強制的にresolveを呼ぶ
-          logger.warn(
-            `[Premature close検出(fallback)] ${displayPath} - 強制完了`
-          );
-
-          // ImageMagickプロセスを強制終了
-          if (magick && !magick.killed) {
-            try {
-              magick.kill("SIGTERM");
-              logger.info(`[ImageMagick強制終了] ${displayPath}`);
-            } catch (e) {
-              // プロセス終了エラーは無視
-            }
+                sendOriginalImage({
+                  fullPath,
+                  displayPath,
+                  res,
+                  originalSize,
+                  statsRecorder,
+                  resolve,
+                  reject,
+                });
+              }
+            }); // レスポンスはパイプラインで自動終了
           }
 
-          return resolve();
+          // 変換完了時の処理
+          let magickResponseSize = 0; // ImageMagickレスポンスサイズ
+          magick.stdout.on("data", (chunk) => {
+            magickResponseSize += chunk.length; // レスポンスサイズを累計
+          });
+          magick.stdout.on("end", () => {
+            logger.info(
+              `[変換完了(ImageMagick)] ${displayPath} (サイズ: ${magickResponseSize.toLocaleString()} bytes)`
+            ); // ImageMagick変換完了ログを出力
+            statsRecorder.record(magickResponseSize);
+            res.end(); // レスポンスを終了
+            return resolve(); // 呼び出し元に完了を伝播
+          });
+
+          // Premature closeエラー対策（onErrorFallback内）
+          res.on("close", () => {
+            if (!res.headersSent || res.writableEnded) {
+              // レスポンスが正常に終了した場合は何もしない
+              return;
+            }
+            // Premature closeの場合は強制的にresolveを呼ぶ
+            logger.warn(
+              `[Premature close検出(fallback)] ${displayPath} - 強制完了`
+            );
+            handlePrematureClose(new Error("Premature close"), magick, displayPath, "response close");
+            return resolve();
+          });
+        })().catch((err) => {
+          logger.error(`[ImageMagick起動エラー] ${displayPath}: ${err.message}`);
+          sendOriginalImage({
+            fullPath,
+            displayPath,
+            res,
+            originalSize,
+            statsRecorder,
+            resolve,
+            reject,
+          });
         });
       };
 
@@ -930,25 +762,25 @@ async function convertAndRespond({
         } catch (e) {}
       }
 
-      // ImageMagickによるフォールバック処理
-      const resizeOpt = Photo_Size
-        ? ["-resize", `${Photo_Size}x${Photo_Size}`]
-        : []; // リサイズオプション
-      const magick = spawn(MAGICK_CMD, [
-        fullPath,
-        ...resizeOpt,
-        "-quality",
-        `${quality}`,
-        "webp:-",
-      ]); // ImageMagickプロセスを起動
+      // ImageMagickによるフォールバック処理（共通ヘルパーを使用）
+      (async () => {
+        const imageMode = getImageMode();
+        const isFast = imageMode === 1;
+        const { magick } = await spawnImageMagick({
+          fullPath,
+          Photo_Size,
+          quality,
+          isFast,
+          useAdvancedOptions: false, // 初期化エラー時はシンプルなオプションを使用
+        });
 
-      // ImageMagickプロセスのエラーハンドリング
-      magick.on("error", (err) => {
-        logger.error(`[ImageMagick変換失敗] ${displayPath}: ${err}`); // エラーログを出力
-        if (!res.headersSent) res.writeHead(415); // サポートされていないメディアタイプ
-        res.end("Unsupported image format (sharp+magick error)"); // エラーメッセージを返す
-        return reject(err); // 呼び出し元にエラーを伝播
-      });
+        // ImageMagickプロセスのエラーハンドリング
+        magick.on("error", (err) => {
+          logger.error(`[ImageMagick変換失敗] ${displayPath}: ${err}`); // エラーログを出力
+          if (!res.headersSent) res.writeHead(415); // サポートされていないメディアタイプ
+          res.end("Unsupported image format (sharp+magick error)"); // エラーメッセージを返す
+          return reject(err); // 呼び出し元にエラーを伝播
+        });
 
       // HTTPヘッダー設定
       if (!res.headersSent) res.setHeader("Content-Type", "image/webp"); // ヘッダー送信
@@ -965,26 +797,12 @@ async function convertAndRespond({
           const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルに書き込み
 
           // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
-          pipeline(magick.stdout, writeStream).catch((e) => {
-            // Premature closeエラーは頻発するため、ログレベルを調整
-            if (e.message && e.message.includes("Premature close")) {
-              logger.info(`[magick->tmp pipeline] ${e.message}`);
-              // Premature closeの場合はImageMagickプロセスを終了
-              if (magick && !magick.killed) {
-                try {
-                  magick.kill("SIGTERM");
-                  logger.info(
-                    `[ImageMagick強制終了(Premature close)] ${displayPath}`
-                  );
-                } catch (killErr) {
-                  // プロセス終了エラーは無視
-                }
+            pipeline(magick.stdout, writeStream).catch((e) => {
+              if (!handlePrematureClose(e, magick, displayPath, "magick->tmp pipeline")) {
+                logger.error(`[magick->tmp pipeline error] ${e.message}`);
               }
-            } else {
-              logger.error(`[magick->tmp pipeline error] ${e.message}`);
-            }
-            // キャッシュ書き込み失敗時はレスポンス継続
-          }); // キャッシュ書き込み
+              // キャッシュ書き込み失敗時はレスポンス継続
+            }); // キャッシュ書き込み
           magick.stdout.pipe(res, { end: false }); // レスポンスは手動で終了
 
           // 書き込み完了時の原子的リネーム処理
@@ -1016,28 +834,12 @@ async function convertAndRespond({
       } else {
         // キャッシュなしの場合は直接レスポンスにストリーミング
         pipeline(magick.stdout, res).catch((e) => {
-          // Premature closeエラーは頻発するため、ログレベルを調整
-          if (e.message && e.message.includes("Premature close")) {
-            logger.info(`[magick->res pipeline] ${e.message}`);
-            // Premature closeの場合はImageMagickプロセスを終了
-            if (magick && !magick.killed) {
-              try {
-                magick.kill("SIGTERM");
-                logger.info(
-                  `[ImageMagick強制終了(Premature close)] ${displayPath}`
-                );
-              } catch (killErr) {
-                // プロセス終了エラーは無視
-              }
-            }
-          } else {
+          if (!handlePrematureClose(e, magick, displayPath, "magick->res pipeline")) {
             logger.error(`[magick->res pipeline error] ${e.message}`);
           }
           // レスポンスエラー時は適切に終了
         }); // レスポンスはパイプラインで自動終了
       }
-
-      // レスポンス終了時の処理（スタック処理では不要）
 
       // 変換完了時の処理
       let initErrorResponseSize = 0; // Sharp初期化エラー時のレスポンスサイズ
@@ -1063,18 +865,14 @@ async function convertAndRespond({
         logger.warn(
           `[Premature close検出(初期化エラー)] ${displayPath} - 強制完了`
         );
-
-        // ImageMagickプロセスを強制終了
-        if (magick && !magick.killed) {
-          try {
-            magick.kill("SIGTERM");
-            logger.info(`[ImageMagick強制終了] ${displayPath}`);
-          } catch (e) {
-            // プロセス終了エラーは無視
-          }
-        }
-
+        handlePrematureClose(new Error("Premature close"), magick, displayPath, "response close");
         return resolve();
+      });
+      })().catch((err) => {
+        logger.error(`[ImageMagick起動エラー(初期化エラー)] ${displayPath}: ${err.message}`);
+        if (!res.headersSent) res.writeHead(415);
+        res.end("Unsupported image format (sharp+magick error)");
+        return reject(err);
       });
     }
   });
@@ -1136,116 +934,22 @@ async function convertHeicWithImageMagick({
     );
 
     /**
-     * ImageMagickコマンドライン引数の構築（Sharpの設定を流用）
-     * - resize: Photo_Sizeが指定されている場合のみリサイズ（Sharpと同じロジック）
-     * - quality: WebP品質設定（Sharpと同じ）
+     * ImageMagickプロセスの起動（共通ヘルパーを使用）
+     * - resize: Photo_Sizeが指定されている場合のみリサイズ（共通ヘルパーで処理）
+     * - quality: WebP品質設定（共通ヘルパーで処理）
      * - webp:-: 標準出力にWebP形式で出力
-     * - SharpのWebP設定をImageMagickオプションに変換
-     *
-     * 技術的詳細:
-     * - spawn使用: ストリーミング処理によるメモリ効率化
-     * - 標準出力: パイプによるデータ転送
-     * - エラーハンドリング: プロセス失敗時の適切な処理
-     * - リソース管理: プロセス終了時の自動クリーンアップ
+     * - 高度なWebPオプションを使用（HEIC処理では詳細設定を有効化）
      */
-    let resizeOpt = [];
-    if (Photo_Size) {
-      if (isFast) {
-        // 高速処理モード: 幅を基準に単純リサイズ（Sharpと同じロジック）
-        resizeOpt = ["-resize", `${Photo_Size}x`];
-      } else {
-        // バランス/高圧縮モード: 縦横を比較して短辺に合わせる（Sharpと同じロジック）
-        try {
-          // ImageMagickでメタデータを取得してサイズ判定
-          logger.info(
-            `[HEIC メタデータ取得] ${displayPath} - サイズ判定のためidentify実行`
-          );
-          const identifyCmd = spawn(MAGICK_CMD, [
-            "identify",
-            "-format",
-            "%wx%h",
-            fullPath,
-          ]);
-          let identifyOutput = "";
-          identifyCmd.stdout.on("data", (chunk) => {
-            identifyOutput += chunk.toString();
-          });
-
-          await new Promise((identifyResolve, identifyReject) => {
-            identifyCmd.on("close", (code) => {
-              if (code === 0) {
-                const [width, height] = identifyOutput
-                  .trim()
-                  .split("x")
-                  .map(Number);
-                logger.info(
-                  `[HEIC メタデータ取得完了] ${displayPath} - サイズ: ${width}x${height}`
-                );
-                if (width < height) {
-                  // 短辺が幅の場合
-                  resizeOpt = ["-resize", `${Photo_Size}x`];
-                  logger.info(`[HEIC リサイズ設定] 幅基準: ${Photo_Size}x`);
-                } else {
-                  // 短辺が高さの場合
-                  resizeOpt = ["-resize", `x${Photo_Size}`];
-                  logger.info(`[HEIC リサイズ設定] 高さ基準: x${Photo_Size}`);
-                }
-                identifyResolve();
-              } else {
-                // メタデータ取得失敗時は幅基準でリサイズ
-                logger.warn(
-                  `[HEIC メタデータ取得失敗] ${displayPath} - 幅基準でリサイズ`
-                );
-                resizeOpt = ["-resize", `${Photo_Size}x`];
-                identifyResolve();
-              }
-            });
-            identifyCmd.on("error", (err) => {
-              // エラー時は幅基準でリサイズ
-              logger.warn(
-                `[HEIC メタデータ取得エラー] ${displayPath} - ${err.message}, 幅基準でリサイズ`
-              );
-              resizeOpt = ["-resize", `${Photo_Size}x`];
-              identifyResolve();
-            });
-          });
-        } catch (e) {
-          // 例外時は幅基準でリサイズ
-          logger.warn(
-            `[HEIC メタデータ取得例外] ${displayPath} - ${e.message}, 幅基準でリサイズ`
-          );
-          resizeOpt = ["-resize", `${Photo_Size}x`];
-        }
-      }
-    }
-
-    // ImageMagickのWebPオプション構築（Sharpの設定を反映）
-    const webpOptions = [
-      "-quality",
-      `${quality}`,
-      "-define",
-      `webp:effort=${effortVal}`,
-      "-define",
-      `webp:preset=${presetVal}`,
-      "-define",
-      `webp:reduction-effort=${reductionEffortVal}`,
-      "-define",
-      "webp:near-lossless=false",
-    ];
-
-    if (!isFast) {
-      // バランス/高圧縮モードではスマートサブサンプリングを有効
-      webpOptions.push("-define", "webp:smart-subsample=true");
-    }
-
-    const magick = spawn(MAGICK_CMD, [
+    const { magick, resizeOpt } = await spawnImageMagick({
       fullPath,
-      ...resizeOpt,
-      ...webpOptions,
-      "webp:-",
-    ]); // ImageMagickプロセスを起動
+      Photo_Size,
+      quality,
+      isFast,
+      useAdvancedOptions: true, // HEIC処理では高度なWebPオプションを使用
+    });
 
-    // ImageMagickプロセス開始のログ
+    // ImageMagickプロセス開始のログ（デバッグ用）
+    const webpOptions = buildWebpOptions(quality, isFast);
     logger.info(
       `[HEIC ImageMagick起動] コマンド: ${MAGICK_CMD} ${[
         fullPath,
@@ -1255,37 +959,16 @@ async function convertHeicWithImageMagick({
       ].join(" ")}`
     );
 
-    // ImageMagickプロセスのエラーハンドリング
-    magick.on("error", (err) => {
-      logger.error(`[HEIC ImageMagick変換失敗] ${fullPath}: ${err}`); // エラーログを出力
-
-      // ImageMagick失敗時は元画像を直接送信
-      logger.info(`[HEIC ImageMagick失敗→元画像送信] ${displayPath}`);
-
-      // HTTPヘッダー設定（まだ送信されていない場合）
-      if (!res.headersSent) {
-        res.setHeader("Content-Type", "image/heic"); // HEIC画像のMIMEタイプ
-      }
-
-      // 元画像ファイルを直接ストリーミング
-      const fileStream = fs.createReadStream(fullPath);
-      fileStream.pipe(res);
-
-      fileStream.on("error", (streamErr) => {
-        logger.error(
-          `[HEIC元画像送信失敗] ${displayPath}: ${streamErr.message}`
-        );
-        if (!res.headersSent) res.writeHead(500);
-        res.end("Failed to read original HEIC image");
-        return reject(streamErr);
-      });
-
-      fileStream.on("end", () => {
-        logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
-        statsRecorder.record(originalSize);
-        res.end();
-        return resolve();
-      });
+    // ImageMagickプロセスのエラーハンドリング（共通ヘルパーを使用）
+    setupImageMagickErrorHandling({
+      magick,
+      fullPath,
+      displayPath,
+      res,
+      originalSize,
+      statsRecorder,
+      resolve,
+      reject,
     });
 
     // HTTPヘッダー設定（まだ送信されていない場合）
@@ -1304,47 +987,27 @@ async function convertHeicWithImageMagick({
 
         const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルへの書き込みストリーム
 
-        // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
-        pipeline(magick.stdout, writeStream).catch((e) => {
-          // Premature closeエラーは頻発するため、ログレベルを調整
-          if (e.message && e.message.includes("Premature close")) {
-            logger.info(`[HEIC magick->tmp pipeline] ${e.message}`);
-            // Premature closeの場合はImageMagickプロセスを終了
-            if (magick && !magick.killed) {
-              try {
-                magick.kill("SIGTERM");
-                logger.info(
-                  `[HEIC ImageMagick強制終了(Premature close)] ${displayPath}`
-                );
-              } catch (killErr) {
-                // プロセス終了エラーは無視
+            // ImageMagickの標準出力を一時ファイルとレスポンスの両方にストリーミング
+            pipeline(magick.stdout, writeStream).catch((e) => {
+              if (!handlePrematureClose(e, magick, displayPath, "HEIC magick->tmp pipeline")) {
+                logger.error(`[HEIC magick->tmp pipeline error] ${e.message}`);
               }
-            }
-          } else {
-            logger.error(`[HEIC magick->tmp pipeline error] ${e.message}`);
-          }
-          // キャッシュ書き込み失敗時はキャッシュなしで続行
-        });
+              // キャッシュ書き込み失敗時はキャッシュなしで続行
+            });
         magick.stdout.pipe(res, { end: false }); // レスポンスは手動で終了
 
         // ImageMagickの標準出力エラーハンドリング
         magick.stdout.on("error", (err) => {
           logger.error(`[HEIC magick->res pipeline error] ${err.message}`);
-
-          // ImageMagickパイプラインエラー時は元画像を送信
           logger.info(
             `[HEIC ImageMagickパイプラインエラー→元画像送信] ${displayPath}`
           );
-
-          // HTTPヘッダー設定（まだ送信されていない場合）
+          // HEIC専用の元画像送信（Content-Type: image/heic）
           if (!res.headersSent) {
             res.setHeader("Content-Type", "image/heic");
           }
-
-          // 元画像ファイルを直接ストリーミング
           const fileStream = fs.createReadStream(fullPath);
           fileStream.pipe(res);
-
           fileStream.on("error", (streamErr) => {
             logger.error(
               `[HEIC元画像送信失敗] ${displayPath}: ${streamErr.message}`
@@ -1353,7 +1016,6 @@ async function convertHeicWithImageMagick({
             res.end("Failed to read original HEIC image");
             return reject(streamErr);
           });
-
           fileStream.on("end", () => {
             logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
             statsRecorder.record(originalSize);
@@ -1387,17 +1049,7 @@ async function convertHeicWithImageMagick({
           }
           // Premature closeの場合は強制的にresolveを呼ぶ
           logger.warn(`[HEIC Premature close検出] ${displayPath} - 強制完了`);
-
-          // ImageMagickプロセスを強制終了
-          if (magick && !magick.killed) {
-            try {
-              magick.kill("SIGTERM");
-              logger.info(`[HEIC ImageMagick強制終了] ${displayPath}`);
-            } catch (e) {
-              // プロセス終了エラーは無視
-            }
-          }
-
+          handlePrematureClose(new Error("Premature close"), magick, displayPath, "HEIC response close");
           return resolve();
         });
       } catch (writeError) {
@@ -1406,37 +1058,17 @@ async function convertHeicWithImageMagick({
         );
         // キャッシュなしでレスポンス継続
         pipeline(magick.stdout, res).catch((err) => {
-          // Premature closeエラーは頻発するため、ログレベルを調整
-          if (err.message && err.message.includes("Premature close")) {
-            logger.info(`[HEIC magick->res pipeline] ${err.message}`);
-            // Premature closeの場合はImageMagickプロセスを終了
-            if (magick && !magick.killed) {
-              try {
-                magick.kill("SIGTERM");
-                logger.info(
-                  `[HEIC ImageMagick強制終了(Premature close)] ${displayPath}`
-                );
-              } catch (killErr) {
-                // プロセス終了エラーは無視
-              }
-            }
-          } else {
+          if (!handlePrematureClose(err, magick, displayPath, "HEIC magick->res pipeline")) {
             logger.error(`[HEIC magick->res pipeline error] ${err.message}`);
-
-            // ImageMagickパイプラインエラー時は元画像を送信
             logger.info(
               `[HEIC ImageMagickパイプラインエラー→元画像送信] ${displayPath}`
             );
-
-            // HTTPヘッダー設定（まだ送信されていない場合）
+            // HEIC専用の元画像送信（Content-Type: image/heic）
             if (!res.headersSent) {
               res.setHeader("Content-Type", "image/heic");
             }
-
-            // 元画像ファイルを直接ストリーミング
             const fileStream = fs.createReadStream(fullPath);
             fileStream.pipe(res);
-
             fileStream.on("error", (streamErr) => {
               logger.error(
                 `[HEIC元画像送信失敗] ${displayPath}: ${streamErr.message}`
@@ -1445,7 +1077,6 @@ async function convertHeicWithImageMagick({
               res.end("Failed to read original HEIC image");
               return reject(streamErr);
             });
-
             fileStream.on("end", () => {
               logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
               statsRecorder.record(originalSize);
@@ -1458,37 +1089,17 @@ async function convertHeicWithImageMagick({
     } else {
       // キャッシュなしの場合は直接レスポンスにストリーミング
       pipeline(magick.stdout, res).catch((e) => {
-        // Premature closeエラーは頻発するため、ログレベルを調整
-        if (e.message && e.message.includes("Premature close")) {
-          logger.info(`[HEIC magick->res pipeline] ${e.message}`);
-          // Premature closeの場合はImageMagickプロセスを終了
-          if (magick && !magick.killed) {
-            try {
-              magick.kill("SIGTERM");
-              logger.info(
-                `[HEIC ImageMagick強制終了(Premature close)] ${displayPath}`
-              );
-            } catch (killErr) {
-              // プロセス終了エラーは無視
-            }
-          }
-        } else {
+        if (!handlePrematureClose(e, magick, displayPath, "HEIC magick->res pipeline")) {
           logger.error(`[HEIC magick->res pipeline error] ${e.message}`);
-
-          // ImageMagickパイプラインエラー時は元画像を送信
           logger.info(
             `[HEIC ImageMagickパイプラインエラー→元画像送信] ${displayPath}`
           );
-
-          // HTTPヘッダー設定（まだ送信されていない場合）
+          // HEIC専用の元画像送信（Content-Type: image/heic）
           if (!res.headersSent) {
             res.setHeader("Content-Type", "image/heic");
           }
-
-          // 元画像ファイルを直接ストリーミング
           const fileStream = fs.createReadStream(fullPath);
           fileStream.pipe(res);
-
           fileStream.on("error", (streamErr) => {
             logger.error(
               `[HEIC元画像送信失敗] ${displayPath}: ${streamErr.message}`
@@ -1497,7 +1108,6 @@ async function convertHeicWithImageMagick({
             res.end("Failed to read original HEIC image");
             return reject(streamErr);
           });
-
           fileStream.on("end", () => {
             logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
             statsRecorder.record(originalSize);
@@ -1542,17 +1152,7 @@ async function convertHeicWithImageMagick({
       }
       // Premature closeの場合は強制的にresolveを呼ぶ
       logger.warn(`[HEIC Premature close検出] ${displayPath} - 強制完了`);
-
-      // ImageMagickプロセスを強制終了
-      if (magick && !magick.killed) {
-        try {
-          magick.kill("SIGTERM");
-          logger.info(`[HEIC ImageMagick強制終了] ${displayPath}`);
-        } catch (e) {
-          // プロセス終了エラーは無視
-        }
-      }
-
+      handlePrematureClose(new Error("Premature close"), magick, displayPath, "HEIC response close");
       return resolve();
     });
   });

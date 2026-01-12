@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>⚙️ WebDAV Pic Server - Settings</title>
+  <title>WebDAV Pic Server - 設定画面</title>
   <link rel="stylesheet" href="/setting/css/settings.css">
   <!-- favicons: add both /icons and /setting/icons paths to match server static routing -->
   <!-- PNG形式を優先（Safari対応） -->
@@ -110,6 +110,17 @@
               </div>
               <!-- <div class="desc">WebPの色数削減・パレット最適化の努力レベル (0=無効 ... 6=最大)</div> -->
             </div>
+            <div class="row child checkbox-row" id="prefetch-adjacent-enabled-row">
+              <label for="PREFETCH_ADJACENT_ENABLED">連続プレビュー最適化を有効にする</label>
+              <input type="checkbox" id="PREFETCH_ADJACENT_ENABLED" name="PREFETCH_ADJACENT_ENABLED" />
+            </div>
+            <div class="row child" id="prefetch-adjacent-count-row">
+              <label for="PREFETCH_ADJACENT_COUNT">事前変換するファイル数（前方のみ）(1 〜 50)</label>
+              <div class="field-control">
+                <input id="PREFETCH_ADJACENT_COUNT" name="PREFETCH_ADJACENT_COUNT" type="range" step="1" min="1" max="50" />
+                <output id="PREFETCH_ADJACENT_COUNT_VAL" for="PREFETCH_ADJACENT_COUNT">5</output>
+              </div>
+            </div>
             <!-- <div class="desc">画像のリサイズ上限(px)、デフォルトの出力品質、処理モードを設定</div> -->
           </div>
 
@@ -138,6 +149,18 @@
             <div class="row">
               <label for="CACHE_MIN_SIZE">キャッシュ対象の最小サイズ (KB)</label>
               <input id="CACHE_MIN_SIZE" name="CACHE_MIN_SIZE" type="number" min="0" inputmode="numeric" title="数値を入力してください (KB)" />
+            </div>
+            <div class="row">
+              <label for="CACHE_MEMORY_LIMIT_MB">キャッシュメモリ制限 (MB)</label>
+              <input id="CACHE_MEMORY_LIMIT_MB" name="CACHE_MEMORY_LIMIT_MB" type="number" min="0" max="4096" inputmode="numeric" title="数値を入力してください (MB)" />
+            </div>
+            <div class="row">
+              <label for="CACHE_MEMORY_FILE_SIZE_LIMIT_MB">メモリキャッシュファイルサイズ制限 (MB)</label>
+              <input id="CACHE_MEMORY_FILE_SIZE_LIMIT_MB" name="CACHE_MEMORY_FILE_SIZE_LIMIT_MB" type="number" min="0" max="100" step="0.1" inputmode="numeric" title="数値を入力してください (MB)" />
+            </div>
+            <div class="row">
+              <label for="CACHE_STREAM_BUFFER_SIZE_KB">ストリーミングバッファサイズ (KB)</label>
+              <input id="CACHE_STREAM_BUFFER_SIZE_KB" name="CACHE_STREAM_BUFFER_SIZE_KB" type="number" min="16" max="2048" step="16" inputmode="numeric" title="数値を入力してください (KB)" />
             </div>
             <div class="row">
               <label for="MAX_CONCURRENCY">同時処理数の上限（1 〜 32）</label>
@@ -395,7 +418,7 @@
       'COMPRESSION_ENABLED','COMPRESSION_THRESHOLD',
       'PORT','ROOT_PATH','MAX_LIST',
   'IMAGE_CONVERSION_ENABLED','PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE',
-  'CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT','WEBP_EFFORT','WEBP_EFFORT_FAST','WEBP_PRESET','WEBP_REDUCTION_EFFORT','WEBP_DETAILED_ENABLED',
+  'CACHE_TTL_MS','CACHE_MIN_SIZE','CACHE_MEMORY_LIMIT_MB','CACHE_MEMORY_FILE_SIZE_LIMIT_MB','CACHE_STREAM_BUFFER_SIZE_KB','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT','WEBP_EFFORT','WEBP_EFFORT_FAST','WEBP_PRESET','WEBP_REDUCTION_EFFORT','WEBP_DETAILED_ENABLED','PREFETCH_ADJACENT_ENABLED','PREFETCH_ADJACENT_COUNT',
   'RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE',
       'EMERGENCY_DISABLE_RATE_LIMIT','STACK_MAX_SIZE','STACK_PROCESSING_DELAY_MS',
       'RESTART_ENABLED','RESTART_TIME','MAGICK_PATH'
@@ -746,6 +769,15 @@
           reOut.textContent = isNaN(n) ? '0' : String(Math.round(n));
         }
       } catch(e) {}
+  // PREFETCH_ADJACENT_COUNT の表示更新
+      try {
+        const prefetchSlider = byId('PREFETCH_ADJACENT_COUNT');
+        const prefetchOut = byId('PREFETCH_ADJACENT_COUNT_VAL');
+        if (prefetchSlider && prefetchOut) {
+          const n = Number(prefetchSlider.value || 5);
+          prefetchOut.textContent = isNaN(n) ? '5' : String(Math.round(n));
+        }
+      } catch(e) {}
   // IMAGE_CONVERSION_ENABLED の初期状態に応じて画像変換関連項目を有効/無効化
       try {
         const imgConvFlag = byId('IMAGE_CONVERSION_ENABLED');
@@ -758,11 +790,13 @@
         const webpDetailedEnabledRow = byId('webp-detailed-enabled-row');
         const webpPresetRow = byId('webp-detailed-preset-row');
         const webpReductionRow = byId('webp-detailed-reduction-row');
+        const prefetchEnabledRow = byId('prefetch-adjacent-enabled-row');
+        const prefetchCountRow = byId('prefetch-adjacent-count-row');
         if (imgConvFlag && (imgTemplateRow || photoSizeRow || defaultQualityRow || imageModeRow)) {
           // 子項目インデント
-          try { [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach(r => { if (r) r.classList.add('child'); }); } catch(e) {}
+          try { [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow, prefetchEnabledRow, prefetchCountRow].forEach(r => { if (r) r.classList.add('child'); }); } catch(e) {}
           const disable = !imgConvFlag.checked;
-          [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach(r => {
+          [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow, prefetchEnabledRow, prefetchCountRow].forEach(r => {
             if (!r) return;
             if (disable) { r.classList.add('hidden'); /* r.classList.add('disabled'); */ } else { r.classList.remove('hidden'); /* r.classList.remove('disabled'); */ }
           });
@@ -930,7 +964,8 @@
         ['PORT','ROOT_PATH','MAX_LIST'],
         ['IMAGE_CONVERSION_ENABLED','PHOTO_SIZE','DEFAULT_QUALITY','IMAGE_MODE'],
         ['WEBP_EFFORT','WEBP_EFFORT_FAST','WEBP_PRESET','WEBP_REDUCTION_EFFORT','WEBP_DETAILED_ENABLED'],
-        ['CACHE_TTL_MS','CACHE_MIN_SIZE','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT'],
+        ['PREFETCH_ADJACENT_ENABLED','PREFETCH_ADJACENT_COUNT'],
+        ['CACHE_TTL_MS','CACHE_MIN_SIZE','CACHE_MEMORY_LIMIT_MB','CACHE_MEMORY_FILE_SIZE_LIMIT_MB','CACHE_STREAM_BUFFER_SIZE_KB','MAX_CONCURRENCY','SHARP_MEMORY_LIMIT','SHARP_PIXEL_LIMIT'],
         ['RATE_LIMIT_ENABLED','RATE_LIMIT_REQUESTS','RATE_LIMIT_WINDOW_MS','RATE_LIMIT_QUEUE_SIZE'],
         ['EMERGENCY_DISABLE_RATE_LIMIT'],
         ['STACK_MAX_SIZE','STACK_PROCESSING_DELAY_MS'],
@@ -1177,6 +1212,18 @@
         efSlider.addEventListener('input', (ev) => { updateWebpEffortFastDisplay(ev.target.value); checkDirty(); });
         updateWebpEffortFastDisplay(efSlider.value || 0);
       }
+      // PREFETCH_ADJACENT_COUNT スライダーの配線
+      const prefetchSlider = byId('PREFETCH_ADJACENT_COUNT');
+      const prefetchOut = byId('PREFETCH_ADJACENT_COUNT_VAL');
+      function updatePrefetchCountDisplay(v){
+        const n = Number(v);
+        if (isNaN(n)) { if (prefetchOut) prefetchOut.textContent = '5'; return; }
+        if (prefetchOut) prefetchOut.textContent = String(Math.round(n));
+      }
+      if (prefetchSlider) {
+        prefetchSlider.addEventListener('input', (ev) => { updatePrefetchCountDisplay(ev.target.value); checkDirty(); });
+        updatePrefetchCountDisplay(prefetchSlider.value || 5);
+      }
       // WEBP_REDUCTION_EFFORT スライダーの配線
       const reSlider = byId('WEBP_REDUCTION_EFFORT');
       const reOut = byId('WEBP_REDUCTION_EFFORT_VAL');
@@ -1345,10 +1392,12 @@
         const webpDetailedEnabledRow = byId('webp-detailed-enabled-row');
         const webpPresetRow = byId('webp-detailed-preset-row');
         const webpReductionRow = byId('webp-detailed-reduction-row');
+        const prefetchEnabledRow = byId('prefetch-adjacent-enabled-row');
+        const prefetchCountRow = byId('prefetch-adjacent-count-row');
         const toggleImageConversionRows = () => {
           if (!imgConvFlag) return;
           const disable = !imgConvFlag.checked;
-          [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow].forEach(r => {
+          [imgTemplateRow, photoSizeRow, defaultQualityRow, imageModeRow, webpEffortRow, webpEffortFastRow, webpDetailedEnabledRow, webpPresetRow, webpReductionRow, prefetchEnabledRow, prefetchCountRow].forEach(r => {
             if (!r) return;
             if (disable) {
               r.classList.add('hidden');

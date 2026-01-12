@@ -532,6 +532,12 @@ function getImageConversionEnabled() {
 const getCacheMinSize = () =>
   getDynamicConfig("CACHE_MIN_SIZE", 1 * 1024 * 1024); // 1MB - キャッシュ対象の最小ファイルサイズ
 const getCacheTTL = () => getDynamicConfig("CACHE_TTL_MS", 5 * 60 * 1000); // 5分 - キャッシュファイルの有効期間
+const getCacheMemoryLimit = () =>
+  getDynamicConfig("CACHE_MEMORY_LIMIT_MB", 2048); // 2048MB (2GB) - キャッシュファイルのメモリキャッシュ制限（大容量RAM環境向け）
+const getCacheMemoryFileSizeLimit = () =>
+  getDynamicConfig("CACHE_MEMORY_FILE_SIZE_LIMIT_MB", 10); // 10MB - メモリキャッシュに読み込むファイルの最大サイズ（大容量RAM環境向け）
+const getCacheStreamBufferSize = () =>
+  getDynamicConfig("CACHE_STREAM_BUFFER_SIZE_KB", 256); // 256KB - ストリーミング送信時のバッファサイズ（大容量RAM環境向け）
 
 // メモリ管理設定読み込み関数
 const getMaxConcurrency = () => getDynamicConfig("MAX_CONCURRENCY", 16); // 最大並列処理数
@@ -590,6 +596,12 @@ const getWebpPreset = () => getDynamicConfig("WEBP_PRESET", "default"); // デ�
 const getWebpReductionEffort = () =>
   parseInt(getDynamicConfig("WEBP_REDUCTION_EFFORT", 0)); // デフォルト 0
 
+// 連続プレビュー最適化設定読み込み関数
+const getPrefetchAdjacentEnabled = () =>
+  getDynamicConfig("PREFETCH_ADJACENT_ENABLED", true); // デフォルト true
+const getPrefetchAdjacentCount = () =>
+  parseInt(getDynamicConfig("PREFETCH_ADJACENT_COUNT", 5)); // デフォルト 5
+
 module.exports = {
   logger, // ロガー
   MAGICK_CMD, // ImageMagickコマンド
@@ -601,6 +613,9 @@ module.exports = {
   getImageConversionEnabled, // 画像変換機能の有効/無効制御
   getCacheMinSize, // キャッシュ対象の最小ファイルサイズ
   getCacheTTL, // キャッシュファイルの有効期間
+  getCacheMemoryLimit, // キャッシュファイルのメモリキャッシュ制限（MB）
+  getCacheMemoryFileSizeLimit, // メモリキャッシュに読み込むファイルの最大サイズ（MB）
+  getCacheStreamBufferSize, // ストリーミング送信時のバッファサイズ（KB）
   getMaxConcurrency, // 最大並列処理数
   getSharpMemoryLimit, // Sharpメモリキャッシュ制限（MB）
   getSharpPixelLimit, // Sharpピクセル制限
@@ -626,4 +641,6 @@ module.exports = {
   getWebpEffortFast, // WebP effort fast 設定 (0-9)
   getWebpPreset, // WebP preset 設定
   getWebpReductionEffort, // WebP reduction effort 設定
+  getPrefetchAdjacentEnabled, // 連続プレビュー最適化有効フラグ
+  getPrefetchAdjacentCount, // 事前変換するファイル数
 };

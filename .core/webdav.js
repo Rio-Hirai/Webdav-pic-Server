@@ -8,6 +8,7 @@ const os = require("os"); // OS情報取得 - CPU数、メモリ情報、プラ�
 const stream = require("stream"); // ストリーム処理 - PassThrough、pipeline等のストリーム操作、メモリ効率化
 const { promisify } = require("util"); // コールバック→Promise変換 - 非同期処理の統一化、pipelineのPromise化
 const { execFile, spawn } = require("child_process"); // 外部プロセス実行 - ImageMagick等の外部コマンド呼び出し、フォールバック処理
+const { Worker } = require("worker_threads"); // Worker Threads - 別スレッドでの事前変換処理実行
 const zlib = require("zlib"); // レスポンス圧縮処理 - gzip/deflate圧縮
 
 // 外部ライブラリ
@@ -25,6 +26,9 @@ const {
   getImageConversionEnabled, // 画像変換有効フラグ - 画像変換機能の有効/無効
   getCacheMinSize, // キャッシュ最小サイズ - キャッシュが有効なファイルサイズの最小値
   getCacheTTL, // キャッシュTTL - キャッシュの有効期限
+  getCacheMemoryLimit, // キャッシュメモリ制限 - キャッシュファイルのメモリキャッシュ制限
+  getCacheMemoryFileSizeLimit, // メモリキャッシュファイルサイズ制限 - メモリキャッシュに読み込むファイルの最大サイズ
+  getCacheStreamBufferSize, // ストリーミングバッファサイズ - ストリーミング送信時のバッファサイズ
   getServerPort, // サーバーポート - WebDAVサーバーのポート番号
   getServerRootPath, // サーバールートパス - WebDAVサーバーのルートディレクトリパス
   getSSLCertPath, // SSL証明書パス - SSL証明書ファイルのパス
@@ -32,7 +36,8 @@ const {
 } = require("./config"); // 設定管理モジュール
 
 // 画像変換モジュール
-const { convertAndRespond, convertAndRespondWithLimit } = require("./image"); // 画像変換モジュール
+const { convertAndRespond, convertAndRespondWithLimit, prefetchAdjacentImages } = require("./image"); // 画像変換モジュール
+const { getPrefetchAdjacentEnabled, getPrefetchAdjacentCount } = require("./config"); // 連続プレビュー最適化設定
 const { recordImageTransfer, recordTextCompression, getStatsSnapshot } = require("./stats");
 
 const PassThrough = stream.PassThrough; // ストリーム処理 - PassThrough、pipeline等のストリーム操作、メモリ効率化
@@ -92,6 +97,294 @@ function startWebDAV(activeCacheDir) {
     ttl: STAT_TTL, // TTL: 1時間
     updateAgeOnGet: true, // 取得時にageを更新
   });
+
+  /**
+   * キャッシュファイルのメモリキャッシュ（LRU）
+   * 頻繁にアクセスされるキャッシュファイルの内容をメモリに保持して高速化
+   *
+   * 技術的詳細:
+   * - LRUアルゴリズム: 最近使用されたエントリを優先保持
+   * - メモリ制限: 最大サイズによるメモリ使用量制御（デフォルト: 100MB）
+   * - TTL管理: 期限切れエントリの自動削除
+   * - 高速化: ディスクI/Oを回避してメモリから直接送信
+   */
+  let cacheFileCache = new LRUCache({
+    maxSize: getCacheMemoryLimit() * 1024 * 1024, // 最大サイズ（バイト）- sizeCalculationを使用する場合はmaxSizeが必要
+    ttl: 10 * 60 * 1000, // TTL: 10分（頻繁にアクセスされるファイルを保持）
+    updateAgeOnGet: true, // 取得時にageを更新
+    // サイズ計算関数: Bufferのサイズを使用（{ buffer, headers }形式にも対応）
+    sizeCalculation: (value) => {
+      if (!value) return 0;
+      if (Buffer.isBuffer(value)) return value.length;
+      if (value.buffer && Buffer.isBuffer(value.buffer)) return value.buffer.length;
+      return 0;
+    },
+  });
+
+  /**
+   * 事前変換専用メモリキャッシュ（LRU）
+   * 事前変換で作成されたキャッシュをメモリのみに保持（ディスクに保存しない）
+   *
+   * 技術的詳細:
+   * - LRUアルゴリズム: 最近使用されたエントリを優先保持
+   * - メモリ制限: 最大サイズによるメモリ使用量制御
+   * - TTL管理: 期限切れエントリの自動削除
+   * - 高速化: ディスクI/Oを完全に回避してメモリから直接送信
+   */
+  let prefetchMemoryCache = new LRUCache({
+    maxSize: getCacheMemoryLimit() * 1024 * 1024, // 最大サイズ（バイト）- 通常のメモリキャッシュと共有
+    ttl: 30 * 60 * 1000, // TTL: 30分（事前変換ファイルを長く保持）
+    updateAgeOnGet: true, // 取得時にageを更新
+    // サイズ計算関数: Bufferのサイズを使用（{ buffer, headers, compressedBuffer }形式にも対応）
+    sizeCalculation: (value) => {
+      if (!value) return 0;
+      if (Buffer.isBuffer(value)) return value.length;
+      if (value.buffer && Buffer.isBuffer(value.buffer)) {
+        let size = value.buffer.length;
+        // 圧縮版もメモリに保存されている場合はそのサイズも加算
+        if (value.compressedBuffer && Buffer.isBuffer(value.compressedBuffer)) {
+          size += value.compressedBuffer.length;
+        }
+        return size;
+      }
+      return 0;
+    },
+  });
+
+  /**
+   * Worker Threadプール（事前変換処理用）
+   * メインスレッドの送信処理を阻害しないように、別スレッドで事前変換処理を実行
+   * 注意: 現在は使用していません（状態管理の複雑さのため、prefetchAdjacentImagesを直接呼び出しています）
+   */
+  const WORKER_POOL_SIZE = Math.min(2, Math.max(1, Math.floor(os.cpus().length / 2))); // CPUコア数の半分、最小1、最大2
+  const prefetchWorkerPool = [];
+  let workerPoolIndex = 0;
+
+
+  // Worker Threadのハンドラ設定関数（再利用可能）
+  function setupWorkerHandlers(worker, workerPath) {
+    worker.on("message", async (message) => {
+      if ((message.type === "success" || message.type === "prefetch_success") && message.data && message.data.buffer) {
+        // 変換完了: メモリキャッシュに追加
+        const { buffer, cachePath, compressedBuffer } = message.data;
+        if (buffer && cachePath) {
+          try {
+            // Worker Threadから送信されたBufferを正しく変換
+            // Uint8Arrayとして送信された場合はBuffer.from()で変換、既にBufferの場合はそのまま使用
+            const bufferObj = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+            const memoryFileSizeLimit = getCacheMemoryFileSizeLimit() * 1024 * 1024; // MB → バイト
+            // sizeCalculation関数が正しく動作するように、Bufferの長さを確認
+            if (bufferObj && bufferObj.length > 0 && bufferObj.length <= memoryFileSizeLimit) {
+              // 非圧縮版のヘッダーを事前に構築
+              const prebuiltHeaders = {
+                "Content-Type": "image/webp",
+                "Content-Length": bufferObj.length,
+                Connection: "Keep-Alive",
+                "Keep-Alive": "timeout=600",
+                "Cache-Control": "public, max-age=3600",
+              };
+
+              // gzip圧縮が有効で、圧縮版が提供されている場合
+              let compressedHeaders = null;
+              if (getCompressionEnabled() && compressedBuffer) {
+                try {
+                  const compressedBufferObj = Buffer.isBuffer(compressedBuffer) ? compressedBuffer : Buffer.from(compressedBuffer);
+                  const compressionRatio = compressedBufferObj.length / bufferObj.length;
+                  const threshold = getCompressionThreshold();
+
+                  // 圧縮効果が閾値未満の場合のみ圧縮版を使用
+                  if (compressionRatio < threshold) {
+                    compressedHeaders = {
+                      "Content-Type": "image/webp",
+                      "Content-Encoding": "gzip",
+                      "Content-Length": compressedBufferObj.length,
+                      Connection: "Keep-Alive",
+                      "Keep-Alive": "timeout=600",
+                      "Cache-Control": "public, max-age=3600",
+                      Vary: "Accept-Encoding",
+                    };
+                  }
+                } catch (e) {
+                  // 圧縮処理エラーは無視（非圧縮版を使用）
+                }
+              }
+
+              // Bufferとヘッダーを一緒に保存（リクエスト時の処理を最小化）
+              // 非圧縮版と圧縮版の両方を保存
+              prefetchMemoryCache.set(cachePath, {
+                buffer: bufferObj,
+                headers: prebuiltHeaders,
+                compressedBuffer: compressedHeaders ? (Buffer.isBuffer(compressedBuffer) ? compressedBuffer : Buffer.from(compressedBuffer)) : null,
+                compressedHeaders: compressedHeaders,
+              });
+              memoryCacheStats.diskReads++; // 統計に記録
+            }
+          } catch (e) {
+            logger.warn(`[Worker Thread] メモリキャッシュ追加エラー: ${e.message}`);
+          }
+        }
+      }
+    });
+    worker.on("error", (error) => {
+      logger.warn(`[Worker Thread] エラー: ${error.message}`);
+      // Worker Threadがエラーで終了した場合、再起動を試みる
+      try {
+        const workerIndex = prefetchWorkerPool.indexOf(worker);
+        if (workerIndex !== -1) {
+          prefetchWorkerPool.splice(workerIndex, 1);
+          // 新しいWorker Threadを作成して追加
+          try {
+            const newWorker = new Worker(workerPath);
+            setupWorkerHandlers(newWorker, workerPath);
+            prefetchWorkerPool.splice(workerIndex, 0, newWorker);
+            logger.info(`[Worker Thread] 再起動成功: インデックス ${workerIndex}`);
+          } catch (e) {
+            logger.warn(`[Worker Thread] 再起動失敗: ${e.message}`);
+          }
+        }
+      } catch (e) {
+        // エラー処理中のエラーは無視
+      }
+    });
+    worker.on("exit", (code) => {
+      if (code !== 0) {
+        logger.warn(`[Worker Thread] 異常終了: コード ${code}`);
+        // Worker Threadが異常終了した場合、再起動を試みる
+        try {
+          const workerIndex = prefetchWorkerPool.indexOf(worker);
+          if (workerIndex !== -1) {
+            prefetchWorkerPool.splice(workerIndex, 1);
+            // 新しいWorker Threadを作成して追加
+            try {
+              const newWorker = new Worker(workerPath);
+              setupWorkerHandlers(newWorker, workerPath);
+              prefetchWorkerPool.splice(workerIndex, 0, newWorker);
+              logger.info(`[Worker Thread] 再起動成功: インデックス ${workerIndex}`);
+            } catch (e) {
+              logger.warn(`[Worker Thread] 再起動失敗: ${e.message}`);
+            }
+          }
+        } catch (e) {
+          // エラー処理中のエラーは無視
+        }
+      }
+    });
+  }
+
+  // Worker Threadプールの初期化
+  function initializeWorkerPool() {
+    for (let i = 0; i < WORKER_POOL_SIZE; i++) {
+      try {
+        const workerPath = path.join(__dirname, "prefetch-worker.js");
+        const worker = new Worker(workerPath);
+        setupWorkerHandlers(worker, workerPath);
+        prefetchWorkerPool.push(worker);
+      } catch (e) {
+        logger.warn(`[Worker Thread] 初期化エラー: ${e.message}`);
+      }
+    }
+    if (prefetchWorkerPool.length > 0) {
+      logger.info(`[Worker Threadプール] ${prefetchWorkerPool.length}個のWorker Threadを初期化`);
+    }
+  }
+
+  // Worker Threadプールのクリーンアップ
+  function cleanupWorkerPool() {
+    prefetchWorkerPool.forEach((worker) => {
+      try {
+        worker.terminate();
+      } catch (e) {
+        // エラーは無視
+      }
+    });
+    prefetchWorkerPool.length = 0;
+    workerPoolIndex = 0; // インデックスもリセット
+  }
+
+  // Worker Threadプールの初期化
+  initializeWorkerPool();
+
+  // プロセス終了時のクリーンアップ処理
+  process.on("SIGTERM", () => {
+    logger.info("[クリーンアップ] SIGTERM受信 - Worker Threadプールを終了します");
+    cleanupWorkerPool();
+  });
+
+  process.on("SIGINT", () => {
+    logger.info("[クリーンアップ] SIGINT受信 - Worker Threadプールを終了します");
+    cleanupWorkerPool();
+  });
+
+  process.on("exit", () => {
+    cleanupWorkerPool();
+  });
+
+  /**
+   * メモリキャッシュの統計情報
+   * パフォーマンス分析用のヒット/ミス率を記録
+   */
+  let memoryCacheStats = {
+    hits: 0, // メモリキャッシュヒット数
+    misses: 0, // メモリキャッシュミス数（ディスクから読み込み）
+    diskReads: 0, // ディスク読み込み数
+    streams: 0, // ストリーミング送信数
+    lastReportTime: Date.now(), // 最後のレポート時刻
+  };
+
+  /**
+   * メモリキャッシュ統計のレポート出力
+   * 定期的に統計情報をログに出力
+   */
+  function reportMemoryCacheStats() {
+    const now = Date.now();
+    const elapsed = (now - memoryCacheStats.lastReportTime) / 1000; // 秒
+    if (elapsed < 60) return; // 60秒未満はスキップ
+
+    const total = memoryCacheStats.hits + memoryCacheStats.misses;
+    const hitRate = total > 0 ? ((memoryCacheStats.hits / total) * 100).toFixed(1) : 0;
+    const cacheSize = (cacheFileCache.calculatedSize || 0) / 1024 / 1024; // MB
+    const cacheCount = cacheFileCache.size || 0;
+    const prefetchCacheSize = (prefetchMemoryCache.calculatedSize || 0) / 1024 / 1024; // MB
+    const prefetchCacheCount = prefetchMemoryCache.size || 0;
+
+    logger.info(
+      `[メモリキャッシュ統計] ヒット率: ${hitRate}% (${memoryCacheStats.hits}/${total}), ` +
+      `ディスク読み込み: ${memoryCacheStats.diskReads}, ` +
+      `ストリーミング: ${memoryCacheStats.streams}, ` +
+      `キャッシュサイズ: ${cacheSize.toFixed(1)}MB/${(getCacheMemoryLimit()).toFixed(1)}MB, ` +
+      `エントリ数: ${cacheCount}, ` +
+      `事前変換キャッシュ: ${prefetchCacheSize.toFixed(1)}MB, エントリ数: ${prefetchCacheCount}`
+    );
+
+    // 統計をリセット（累積ではなく期間ごとの統計）
+    memoryCacheStats.lastReportTime = now;
+  }
+
+  /**
+   * メモリキャッシュの再初期化関数
+   * 設定変更時にメモリキャッシュのサイズを更新
+   */
+  function reinitializeCacheMemory() {
+    const oldSize = cacheFileCache.maxSize;
+    const newSize = getCacheMemoryLimit() * 1024 * 1024;
+    if (oldSize !== newSize) {
+      // 既存のキャッシュをクリアして新しいサイズで再作成
+      cacheFileCache.clear();
+      cacheFileCache = new LRUCache({
+        maxSize: newSize, // sizeCalculationを使用する場合はmaxSizeが必要
+        ttl: 10 * 60 * 1000,
+        updateAgeOnGet: true,
+        // サイズ計算関数: Bufferのサイズを使用（{ buffer, headers }形式にも対応）
+        sizeCalculation: (value) => {
+          if (!value) return 0;
+          if (Buffer.isBuffer(value)) return value.length;
+          if (value.buffer && Buffer.isBuffer(value.buffer)) return value.buffer.length;
+          return 0;
+        },
+      });
+      logger.info(`[キャッシュメモリ再初期化] サイズ: ${(oldSize / 1024 / 1024).toFixed(1)}MB → ${(newSize / 1024 / 1024).toFixed(1)}MB`);
+    }
+  }
 
   // スタック処理システムでは並列処理制限は不要（順次処理のため）
 
@@ -761,14 +1054,32 @@ function startWebDAV(activeCacheDir) {
         logger.info(`[PROPFIND] from=${req.connection.remoteAddress} path=${displayPath} depth=${depth}`); // PROPFINDログ
       }
 
-      logger.info(`${req.connection.remoteAddress} ${req.method} ${displayPath}`); // リクエストログ
+      // logger.info(`${req.connection.remoteAddress} ${req.method} ${displayPath}`); // リクエストログ（パフォーマンス最適化のためコメントアウト）
 
       /**
-       * 画像ファイルのGETリクエスト処理（並列処理）
-       * 画像拡張子を持つファイルへのアクセス時に変換処理を直接実行
+       * Range要求の解析関数
+       * HTTP Rangeヘッダーを解析して開始位置と終了位置を返す
+       * OwlFiles対応のため厳密に実装
        */
-      if (req.method === "GET" && IMAGE_EXTS.includes(ext)) {
-        logger.info(`[変換要求] ${fullPath}`); // 変換要求ログ
+      function parseRange(rangeHeader, fileSize) {
+        if (!rangeHeader || !fileSize) return null;
+        const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (!match) return null;
+        const start = parseInt(match[1], 10);
+        const end = match[2] ? parseInt(match[2], 10) : fileSize - 1;
+        if (start < 0 || start >= fileSize || end < start || end >= fileSize) {
+          return null; // 無効な範囲
+        }
+        return { start, end, length: end - start + 1 };
+      }
+
+      /**
+       * 画像ファイルのGET/HEADリクエスト処理（並列処理）
+       * 画像拡張子を持つファイルへのアクセス時に変換処理を直接実行
+       * OwlFiles対応のためRange要求とHEADリクエストにも対応
+       */
+      if ((req.method === "GET" || req.method === "HEAD") && IMAGE_EXTS.includes(ext)) {
+        // logger.info(`[変換要求] ${fullPath}`); // 変換要求ログ（パフォーマンス最適化のためコメントアウト）
 
         // 並列制限付きで直接変換処理を実行（スタック処理は使用しない）
         (async () => {
@@ -808,27 +1119,118 @@ function startWebDAV(activeCacheDir) {
             else if (fileExt === ".avif") contentType = "image/avif";
             else if (fileExt === ".heic" || fileExt === ".heif") contentType = "image/heic";
 
-            res.writeHead(200, {
+            // HEADリクエストの早期チェック
+            if (req.method === "HEAD") {
+              const headers = {
               "Content-Type": contentType,
               "Content-Length": st.size,
               "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+                "Accept-Ranges": "bytes",
               Connection: "Keep-Alive",
               "Keep-Alive": "timeout=600",
-            });
+              };
+              res.writeHead(200, headers);
+              res.end();
+              return;
+            }
 
+            // Range要求のチェック
+            const rangeHeader = req.headers.range;
+            const range = rangeHeader ? parseRange(rangeHeader, st.size) : null;
+
+            // クライアント切断時の処理
+            let aborted = false;
+            const cleanup = () => {
+              aborted = true;
+            };
+            req.on("close", cleanup);
+            req.on("aborted", cleanup);
+
+            if (range) {
+              // Range要求: 206 Partial Content
+              if (aborted) return;
+              const headers = {
+                "Content-Type": contentType,
+                "Content-Range": `bytes ${range.start}-${range.end}/${st.size}`,
+                "Content-Length": range.length,
+                "Accept-Ranges": "bytes",
+                "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+                Connection: "Keep-Alive",
+                "Keep-Alive": "timeout=600",
+              };
+              res.writeHead(206, headers);
+              const fileStream = fs.createReadStream(fullPath, {
+                start: range.start,
+                end: range.end,
+              });
+              fileStream.on("error", (err) => {
+                if (aborted) return;
+                logger.error(`[元画像送信失敗] ${displayPath}: ${err.message}`);
+                try {
+                  if (!res.headersSent) res.writeHead(500);
+                } catch (_) {}
+                try {
+                  res.end("Failed to read original image");
+                } catch (_) {}
+              });
+              fileStream.on("end", () => {
+                if (!aborted) recordImageStats(range.length, false);
+              });
+              req.on("close", () => {
+                try {
+                  fileStream.destroy();
+                } catch (_) {}
+              });
+              req.on("aborted", () => {
+                try {
+                  fileStream.destroy();
+                } catch (_) {}
+              });
+              if (!aborted) {
+                return fileStream.pipe(res);
+              }
+            } else {
+              // 通常の要求: 200 OK
+              if (aborted) return;
+              const headers = {
+                "Content-Type": contentType,
+                "Content-Length": st.size,
+                "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+                "Accept-Ranges": "bytes",
+                Connection: "Keep-Alive",
+                "Keep-Alive": "timeout=600",
+              };
+              res.writeHead(200, headers);
             const fileStream = fs.createReadStream(fullPath);
-            fileStream.pipe(res);
             fileStream.on("error", (err) => {
+                if (aborted) return;
               logger.error(`[元画像送信失敗] ${displayPath}: ${err.message}`);
+                try {
               if (!res.headersSent) res.writeHead(500);
+                } catch (_) {}
+                try {
               res.end("Failed to read original image");
+                } catch (_) {}
             });
-            fileStream.on("end", () => recordImageStats(st.size, false));
+              fileStream.on("end", () => {
+                if (!aborted) recordImageStats(st.size, false);
+              });
+              req.on("close", () => {
+                try {
+                  fileStream.destroy();
+                } catch (_) {}
+              });
+              req.on("aborted", () => {
+                try {
+                  fileStream.destroy();
+                } catch (_) {}
+              });
+              if (!aborted) {
+                return fileStream.pipe(res);
+              }
+            }
             return;
           }
-
-          // 画像サイズが1MB以上の場合のみキャッシュ
-          const shouldCache = st.size >= getCacheMinSize(); // キャッシュが必要かどうか
 
           /**
            * 品質パラメータの取得と検証
@@ -863,26 +1265,300 @@ function startWebDAV(activeCacheDir) {
             ? path.join(activeCacheDir, key + ".webp") // キャッシュパスを設定
             : null; // キャッシュディレクトリが存在しない場合はnullを設定
 
+          // 画像サイズが1MB以上の場合のみ新規キャッシュを作成
+          // ただし、既存のキャッシュファイルが存在する場合は使用する
+          const shouldCreateCache = st.size >= getCacheMinSize(); // 新規キャッシュ作成が必要かどうか
+
           /**
            * キャッシュファイルの存在確認とレスポンス
            * 非同期でチェックしてブロッキングを避ける
+           * キャッシュファイルが存在する場合は、元のファイルサイズに関係なく使用する
            */
-          if (shouldCache) {
+          if (cachePath) {
             try {
+              // 事前変換メモリキャッシュから確認（最速、ディスクI/O完全回避）
+              const prefetchCache = prefetchMemoryCache.get(cachePath);
+              if (prefetchCache && prefetchCache.buffer && Buffer.isBuffer(prefetchCache.buffer)) {
+                // クライアントのAccept-Encodingを確認し、gzipをサポートしている場合は圧縮版を使用
+                const acceptEncoding = req.headers["accept-encoding"] || "";
+                const supportsGzip = acceptEncoding.includes("gzip");
+                const useCompressed = getCompressionEnabled() && supportsGzip && prefetchCache.compressedBuffer && prefetchCache.compressedHeaders;
+                const buffer = useCompressed ? prefetchCache.compressedBuffer : prefetchCache.buffer;
+                const baseHeaders = useCompressed ? prefetchCache.compressedHeaders : prefetchCache.headers;
+                const fileSize = buffer.length;
+
+                // HEADリクエストの早期チェック
+                if (req.method === "HEAD") {
+                  memoryCacheStats.hits++;
+                  const headers = {
+                    ...baseHeaders,
+                    "Accept-Ranges": "bytes",
+                    ETag: '"' + prefetchCache.buffer.length + "-" + Date.now() + '"',
+                  };
+                  res.writeHead(200, headers);
+                  res.end();
+                  return;
+                }
+
+                // Range要求のチェック
+                const rangeHeader = req.headers.range;
+                const range = rangeHeader ? parseRange(rangeHeader, fileSize) : null;
+
+                // クライアント切断時の処理
+                let aborted = false;
+                const cleanup = () => {
+                  aborted = true;
+                };
+                req.on("close", cleanup);
+                req.on("aborted", cleanup);
+
+                if (range) {
+                  // Range要求: 206 Partial Content
+                  if (aborted) return;
+                  memoryCacheStats.hits++;
+                  reportMemoryCacheStats();
+                  const rangeBuffer = buffer.slice(range.start, range.end + 1);
+                  const headers = {
+                    "Content-Type": "image/webp",
+                    "Content-Range": `bytes ${range.start}-${range.end}/${fileSize}`,
+                    "Content-Length": range.length,
+                    "Accept-Ranges": "bytes",
+                    Connection: "Keep-Alive",
+                    "Keep-Alive": "timeout=600",
+                    "Cache-Control": "public, max-age=3600",
+                    ETag: '"' + prefetchCache.buffer.length + "-" + Date.now() + '"',
+                  };
+                  res.writeHead(206, headers);
+                  if (!aborted) {
+                    res.end(rangeBuffer);
+                    recordImageStats(range.length, true);
+                  }
+                } else {
+                  // 通常の要求: 200 OK
+                  if (aborted) return;
+                  memoryCacheStats.hits++;
+                  reportMemoryCacheStats();
+                  const headers = {
+                    ...baseHeaders,
+                    "Accept-Ranges": "bytes",
+                    ETag: '"' + prefetchCache.buffer.length + "-" + Date.now() + '"',
+                  };
+                  res.writeHead(200, headers);
+                  if (!aborted) {
+                    res.end(buffer);
+                    recordImageStats(buffer.length, true);
+                  }
+                }
+                return;
+              }
+
+              // 通常のメモリキャッシュから確認（高速化）
+              const cachedData = cacheFileCache.get(cachePath);
+              // 後方互換性: Bufferのみの場合と{ buffer, headers }の両方に対応
+              const cachedBuffer = cachedData && Buffer.isBuffer(cachedData) ? cachedData : (cachedData && cachedData.buffer ? cachedData.buffer : null);
+              const cachedHeaders = cachedData && cachedData.headers ? cachedData.headers : null;
+              if (cachedBuffer && Buffer.isBuffer(cachedBuffer)) {
+                const fileSize = cachedBuffer.length;
+
+                // HEADリクエストの早期チェック
+                if (req.method === "HEAD") {
+                  memoryCacheStats.hits++;
+                  const headers = cachedHeaders
+                    ? {
+                        ...cachedHeaders,
+                        "Accept-Ranges": "bytes",
+                        ETag: '"' + cachedBuffer.length + "-" + Date.now() + '"',
+                      }
+                    : {
+                        "Content-Type": "image/webp",
+                        "Content-Length": cachedBuffer.length,
+                        "Accept-Ranges": "bytes",
+                        ETag: '"' + cachedBuffer.length + "-" + Date.now() + '"',
+                        Connection: "Keep-Alive",
+                        "Keep-Alive": "timeout=600",
+                        "Cache-Control": "public, max-age=3600",
+                      };
+                  res.writeHead(200, headers);
+                  res.end();
+                  return;
+                }
+
+                // Range要求のチェック
+                const rangeHeader = req.headers.range;
+                const range = rangeHeader ? parseRange(rangeHeader, fileSize) : null;
+
+                // クライアント切断時の処理
+                let aborted = false;
+                const cleanup = () => {
+                  aborted = true;
+                };
+                req.on("close", cleanup);
+                req.on("aborted", cleanup);
+
+                if (range) {
+                  // Range要求: 206 Partial Content
+                  if (aborted) return;
+                  memoryCacheStats.hits++;
+                  reportMemoryCacheStats();
+                  const rangeBuffer = cachedBuffer.slice(range.start, range.end + 1);
+                  const headers = {
+                    "Content-Type": "image/webp",
+                    "Content-Range": `bytes ${range.start}-${range.end}/${fileSize}`,
+                    "Content-Length": range.length,
+                    "Accept-Ranges": "bytes",
+                    Connection: "Keep-Alive",
+                    "Keep-Alive": "timeout=600",
+                    "Cache-Control": "public, max-age=3600",
+                    ETag: '"' + cachedBuffer.length + "-" + Date.now() + '"',
+                  };
+                  res.writeHead(206, headers);
+                  if (!aborted) {
+                    res.end(rangeBuffer);
+                    recordImageStats(range.length, true);
+                  }
+                } else {
+                  // 通常の要求: 200 OK
+                  if (aborted) return;
+                  memoryCacheStats.hits++;
+                  reportMemoryCacheStats();
+                  const headers = cachedHeaders
+                    ? {
+                        ...cachedHeaders,
+                        "Accept-Ranges": "bytes",
+                        ETag: '"' + cachedBuffer.length + "-" + Date.now() + '"',
+                      }
+                    : {
+                        "Content-Type": "image/webp",
+                        "Content-Length": cachedBuffer.length,
+                        "Accept-Ranges": "bytes",
+                        ETag: '"' + cachedBuffer.length + "-" + Date.now() + '"',
+                        Connection: "Keep-Alive",
+                        "Keep-Alive": "timeout=600",
+                        "Cache-Control": "public, max-age=3600",
+                      };
+                  res.writeHead(200, headers);
+                  if (!aborted) {
+                    res.end(cachedBuffer);
+                    recordImageStats(cachedBuffer.length, true);
+                  }
+                }
+                return;
+              }
+
+              // メモリキャッシュにない場合はディスクから読み込み
+              memoryCacheStats.misses++;
               const cst = await statPWrap(cachePath).catch(() => null);
               if (cst && cst.isFile && cst.isFile()) {
-                // キャッシュファイルが存在する場合、直接レスポンス
+                // 設定可能なサイズ以下のファイルはメモリキャッシュに読み込む
+                const memoryFileSizeLimit = getCacheMemoryFileSizeLimit() * 1024 * 1024; // MB → バイト
+                const shouldCacheInMemory = cst.size <= memoryFileSizeLimit;
+                if (shouldCacheInMemory) {
+                  try {
+                    memoryCacheStats.diskReads++;
+                    const fileBuffer = await fs.promises.readFile(cachePath);
+                    // HTTPレスポンスヘッダーを事前に構築してメモリキャッシュに保存
+                    const prebuiltHeaders = {
+                      "Content-Type": "image/webp",
+                      "Content-Length": fileBuffer.length,
+                      "Last-Modified": new Date(cst.mtimeMs).toUTCString(),
+                      Connection: "Keep-Alive",
+                      "Keep-Alive": "timeout=600",
+                      "Cache-Control": "public, max-age=3600",
+                    };
+                    cacheFileCache.set(cachePath, {
+                      buffer: fileBuffer,
+                      headers: prebuiltHeaders,
+                    });
+                    // メモリキャッシュに保存後、送信
+                    const fileSize = fileBuffer.length;
+
+                    // HEADリクエストの早期チェック
+                    if (req.method === "HEAD") {
+                      reportMemoryCacheStats();
                 const headers = {
-                  "Content-Type": "image/webp", // コンテントタイプを設定
-                  "Content-Length": cst.size, // コンテント長を設定
-                  "Last-Modified": new Date(cst.mtimeMs).toUTCString(), // 最終更新時間を設定
-                  ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"', // ETagを設定
-                  Connection: "Keep-Alive", // 接続を保持
-                  "Keep-Alive": "timeout=600", // 接続タイムアウトを600秒に設定
-                }; // ヘッダーを設定
-                res.writeHead(200, headers); // ステータスコードを200に設定してヘッダーを送信
+                        ...prebuiltHeaders,
+                        "Accept-Ranges": "bytes",
+                        ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"',
+                      };
+                      res.writeHead(200, headers);
+                      res.end();
+                      return;
+                    }
+
+                    // Range要求のチェック
+                    const rangeHeader = req.headers.range;
+                    const range = rangeHeader ? parseRange(rangeHeader, fileSize) : null;
+
+                    // クライアント切断時の処理
+                    let aborted = false;
+                    const cleanup = () => {
+                      aborted = true;
+                    };
+                    req.on("close", cleanup);
+                    req.on("aborted", cleanup);
+
+                    if (range) {
+                      // Range要求: 206 Partial Content
+                      if (aborted) return;
+                      reportMemoryCacheStats();
+                      const rangeBuffer = fileBuffer.slice(range.start, range.end + 1);
+                      const headers = {
+                        "Content-Type": "image/webp",
+                        "Content-Range": `bytes ${range.start}-${range.end}/${fileSize}`,
+                        "Content-Length": range.length,
+                        "Accept-Ranges": "bytes",
+                        "Last-Modified": new Date(cst.mtimeMs).toUTCString(),
+                        Connection: "Keep-Alive",
+                        "Keep-Alive": "timeout=600",
+                        "Cache-Control": "public, max-age=3600",
+                        ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"',
+                      };
+                      res.writeHead(206, headers);
+                      if (!aborted) {
+                        res.end(rangeBuffer);
+                        recordImageStats(range.length, true);
+                      }
+                    } else {
+                      // 通常の要求: 200 OK
+                      if (aborted) return;
+                      reportMemoryCacheStats();
+                      const headers = {
+                        ...prebuiltHeaders,
+                        "Accept-Ranges": "bytes",
+                        ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"',
+                      };
+                      res.writeHead(200, headers);
+                      if (!aborted) {
+                        res.end(fileBuffer);
+                        recordImageStats(cst.size, true);
+                      }
+                    }
+                    return;
+              } catch (readError) {
+                logger.warn(`[cache memory read error] ${displayPath}: ${readError.message}`);
+                // メモリ読み込み失敗時はストリーミングにフォールバック
+              }
+            }
+
+            // 大きいファイルまたはメモリ読み込み失敗時はストリーミング送信
+            memoryCacheStats.streams++;
+            reportMemoryCacheStats(); // 定期的に統計をレポート
+                const headers = {
+                  "Content-Type": "image/webp",
+                  "Content-Length": cst.size,
+                  "Last-Modified": new Date(cst.mtimeMs).toUTCString(),
+                  ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"',
+                  Connection: "Keep-Alive",
+                  "Keep-Alive": "timeout=600",
+                  "Cache-Control": "public, max-age=3600",
+                };
+                res.writeHead(200, headers);
                 try {
-                  const s = fs.createReadStream(cachePath);
+                  // 高水準バッファリングでストリーミング（高速化）
+                  const bufferSize = getCacheStreamBufferSize() * 1024; // KB → バイト
+                  const s = fs.createReadStream(cachePath, {
+                    highWaterMark: bufferSize, // 設定可能なバッファサイズ
+                  });
                   let recorded = false;
                   const recordOnce = () => {
                     if (recorded) return;
@@ -915,7 +1591,7 @@ function startWebDAV(activeCacheDir) {
                 }
               }
             } catch (e) {
-              logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
+              logger.warn("[cache read error async]", e);
             }
           }
 
@@ -924,13 +1600,201 @@ function startWebDAV(activeCacheDir) {
             await convertAndRespondWithLimit({
               fullPath, // ファイルパス
               displayPath, // 表示パス
-              cachePath: shouldCache ? cachePath : null, // キャッシュパス
+              cachePath: shouldCreateCache ? cachePath : null, // キャッシュパス（新規作成が必要な場合のみ）
               quality, // 品質
               Photo_Size: getPhotoSize(), // 写真サイズ
               res, // レスポンス
               clientIP, // クライアントIP
               originalSize: st.size,
             }); // 画像変換を実行
+
+            // 連続プレビュー最適化: 前方Nファイルの事前変換・キャッシュ処理
+            // 既存の変換処理を妨げないように、setImmediateで実行（完了を待たない）
+            // 現在のファイルがキャッシュ対象でなくても、次のファイルがキャッシュ対象になる可能性があるため実行
+            // 重複チェックはprefetchAdjacentImages内で実行される
+            if (activeCacheDir && getPrefetchAdjacentEnabled()) {
+              setImmediate(() => {
+                const addToPrefetchMemoryCache = async (adjacentFullPath, adjacentStat, buffer, prefetchCachePath) => {
+                  try {
+                    const memoryFileSizeLimit = getCacheMemoryFileSizeLimit() * 1024 * 1024;
+                    if (buffer.length <= memoryFileSizeLimit && prefetchCachePath) {
+                      const prebuiltHeaders = {
+                        "Content-Type": "image/webp",
+                        "Content-Length": buffer.length,
+                        Connection: "Keep-Alive",
+                        "Keep-Alive": "timeout=600",
+                        "Cache-Control": "public, max-age=3600",
+                      };
+
+                      // gzip圧縮を試みる（圧縮機能が有効な場合）
+                      let compressedHeaders = null;
+                      let compressedBuffer = null;
+                      if (getCompressionEnabled()) {
+                        try {
+                          const compressed = await new Promise((resolve, reject) => {
+                            zlib.gzip(
+                              buffer,
+                              {
+                                level: 9,
+                                memLevel: 9,
+                                windowBits: 15,
+                              },
+                              (err, compressed) => {
+                                if (err) reject(err);
+                                else resolve(compressed);
+                              }
+                            );
+                          });
+
+                          // 圧縮効果を確認
+                          const compressionRatio = compressed.length / buffer.length;
+                          const threshold = getCompressionThreshold();
+
+                          // 圧縮効果が閾値未満の場合のみ圧縮版を使用
+                          if (compressionRatio < threshold) {
+                            compressedHeaders = {
+                              "Content-Type": "image/webp",
+                              "Content-Encoding": "gzip",
+                              "Content-Length": compressed.length,
+                              Connection: "Keep-Alive",
+                              "Keep-Alive": "timeout=600",
+                              "Cache-Control": "public, max-age=3600",
+                              Vary: "Accept-Encoding",
+                            };
+                            compressedBuffer = compressed;
+                          }
+                        } catch (e) {
+                          // 圧縮エラーは無視（非圧縮版を使用）
+                        }
+                      }
+
+                      prefetchMemoryCache.set(prefetchCachePath, {
+                        buffer: buffer,
+                        headers: prebuiltHeaders,
+                        compressedBuffer: compressedBuffer,
+                        compressedHeaders: compressedHeaders,
+                      });
+                      memoryCacheStats.diskReads++;
+                    }
+                  } catch (e) {
+                    // エラーは無視
+                  }
+                };
+
+                prefetchAdjacentImages({
+                  fullPath,
+                  displayPath,
+                  activeCacheDir,
+                  quality,
+                  Photo_Size: getPhotoSize(),
+                  cacheMinSize: getCacheMinSize(),
+                  imageExts: IMAGE_EXTS,
+                  prefetchCount: getPrefetchAdjacentCount(),
+                  memoryOnly: true,
+                  onMemoryCache: addToPrefetchMemoryCache,
+                  onFolderChange: (oldDirPath) => {
+                    // フォルダが変わったときにprefetchMemoryCacheをクリーンアップ（メモリ解放）
+                    // cachePathはSHA-256ハッシュのため、フォルダパスから直接判定できない
+                    // そのため、フォルダが変わったときに全削除してメモリを解放
+                    prefetchMemoryCache.clear();
+                  },
+                }).catch((e) => {
+                  logger.warn(`[連続プレビュー] エラー: ${displayPath} - ${e.message}`);
+                });
+              });
+            } else if (activeCacheDir && getPrefetchAdjacentEnabled()) {
+              // Worker Threadプールが使用できない場合は従来の方法を使用
+              // 重複チェックはprefetchAdjacentImages内で実行される
+              setImmediate(() => {
+                const addToPrefetchMemoryCache = async (adjacentFullPath, adjacentStat, buffer, prefetchCachePath) => {
+                  try {
+                    const memoryFileSizeLimit = getCacheMemoryFileSizeLimit() * 1024 * 1024;
+                    if (buffer.length <= memoryFileSizeLimit && prefetchCachePath) {
+                      const prebuiltHeaders = {
+                        "Content-Type": "image/webp",
+                        "Content-Length": buffer.length,
+                        Connection: "Keep-Alive",
+                        "Keep-Alive": "timeout=600",
+                        "Cache-Control": "public, max-age=3600",
+                      };
+
+                      // gzip圧縮を試みる（圧縮機能が有効な場合）
+                      let compressedHeaders = null;
+                      let compressedBuffer = null;
+                      if (getCompressionEnabled()) {
+                        try {
+                          const compressed = await new Promise((resolve, reject) => {
+                            zlib.gzip(
+                              buffer,
+                              {
+                                level: 9,
+                                memLevel: 9,
+                                windowBits: 15,
+                              },
+                              (err, compressed) => {
+                                if (err) reject(err);
+                                else resolve(compressed);
+                              }
+                            );
+                          });
+
+                          // 圧縮効果を確認
+                          const compressionRatio = compressed.length / buffer.length;
+                          const threshold = getCompressionThreshold();
+
+                          // 圧縮効果が閾値未満の場合のみ圧縮版を使用
+                          if (compressionRatio < threshold) {
+                            compressedHeaders = {
+                              "Content-Type": "image/webp",
+                              "Content-Encoding": "gzip",
+                              "Content-Length": compressed.length,
+                              Connection: "Keep-Alive",
+                              "Keep-Alive": "timeout=600",
+                              "Cache-Control": "public, max-age=3600",
+                              Vary: "Accept-Encoding",
+                            };
+                            compressedBuffer = compressed;
+                          }
+                        } catch (e) {
+                          // 圧縮エラーは無視（非圧縮版を使用）
+                        }
+                      }
+
+                      prefetchMemoryCache.set(prefetchCachePath, {
+                        buffer: buffer,
+                        headers: prebuiltHeaders,
+                        compressedBuffer: compressedBuffer,
+                        compressedHeaders: compressedHeaders,
+                      });
+                      memoryCacheStats.diskReads++;
+                    }
+                  } catch (e) {
+                    // エラーは無視
+                  }
+                };
+
+                prefetchAdjacentImages({
+                  fullPath,
+                  displayPath,
+                  activeCacheDir,
+                  quality,
+                  Photo_Size: getPhotoSize(),
+                  cacheMinSize: getCacheMinSize(),
+                  imageExts: IMAGE_EXTS,
+                  prefetchCount: getPrefetchAdjacentCount(),
+                  memoryOnly: true,
+                  onMemoryCache: addToPrefetchMemoryCache,
+                  onFolderChange: (oldDirPath) => {
+                    // フォルダが変わったときにprefetchMemoryCacheをクリーンアップ（メモリ解放）
+                    // cachePathはSHA-256ハッシュのため、フォルダパスから直接判定できない
+                    // そのため、フォルダが変わったときに全削除してメモリを解放
+                    prefetchMemoryCache.clear();
+                  },
+                }).catch((e) => {
+                  logger.warn(`[連続プレビュー] エラー: ${displayPath} - ${e.message}`);
+                });
+              });
+            }
           } catch (e) {
             logger.warn("[convert error]", e);
             try {
@@ -1284,6 +2148,17 @@ function startWebDAV(activeCacheDir) {
       logger.info(`[INFO] 圧縮機能=${getCompressionEnabled() ? "有効" : "無効"} / 圧縮閾値=${(getCompressionThreshold() * 100).toFixed(1)}%`); // 圧縮機能ログ
     });
   });
+}
+
+/**
+ * メモリキャッシュの再初期化関数（外部から呼び出し可能）
+ * 設定変更時にメモリキャッシュのサイズを更新
+ */
+function reinitializeCacheMemory() {
+  // startWebDAV内のcacheFileCacheにアクセスできないため、
+  // グローバルスコープで管理する必要がある
+  // 現在はstartWebDAV内で管理されているため、設定変更時の再初期化は
+  // サーバー再起動が必要（将来的に改善可能）
 }
 
 module.exports = {

@@ -41,6 +41,16 @@ const pipeline = promisify(stream.pipeline); // パイプライン
  */
 const inFlightConversions = new Map(); // in-flight変換の管理（重複変換防止）
 
+/**
+ * 事前変換の重複実行を防ぐための管理
+ * 同じファイルに対して短時間内に複数の事前変換が実行されることを防ぐ
+ * キー: `${dirPath}|${fileName}`, 値: タイムスタンプ
+ */
+const activePrefetches = new Map();
+const PREFETCH_COOLDOWN = 5000; // 5秒間は同じファイルに対して事前変換を実行しない
+let lastPrefetchDirPath = null; // 前回の事前変換が実行されたディレクトリパス
+let lastPrefetchedEndIndex = null; // 前回先読み済みの終了インデックス（常に先頭から50枚先の位置を維持）
+
 // 初期並列数でpLimitを初期化
 let conversionLimit = pLimit(getMaxConcurrency());
 
@@ -76,7 +86,7 @@ async function convertAndRespondWithLimit(params) {
 
   // in-flight重複チェック
   if (inFlightConversions.has(cacheKey)) {
-    logger.info(`[重複変換防止] 同じ画像の変換が進行中: ${displayPath}`);
+    // logger.info(`[重複変換防止] 同じ画像の変換が進行中: ${displayPath}`); // パフォーマンス最適化のためコメントアウト
 
     // 既存の変換完了を待つ
     return new Promise((resolve) => {
@@ -166,7 +176,7 @@ async function convertAndRespond({
   const isHeicImage = fileExt === ".heic" || fileExt === ".heif";
 
   if (isHeicImage) {
-    logger.info(`[HEIC画像検出] ImageMagickに直接ルーティング: ${displayPath}`);
+    // logger.info(`[HEIC画像検出] ImageMagickに直接ルーティング: ${displayPath}`); // パフォーマンス最適化のためコメントアウト
     return convertHeicWithImageMagick({
       fullPath,
       displayPath,
@@ -303,11 +313,11 @@ async function convertAndRespond({
         );
         global.imageConversionLogged = true;
       } else {
-        logger.info(
-          `[変換実行] ${displayPath} → ${
-            cachePath ?? "(no cache)"
-          } (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal})`
-        );
+        // logger.info(
+        //   `[変換実行] ${displayPath} → ${
+        //     cachePath ?? "(no cache)"
+        //   } (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal})`
+        // ); // パフォーマンス最適化のためコメントアウト
       }
 
       /**
@@ -440,7 +450,7 @@ async function convertAndRespond({
           });
 
           fileStream.on("end", () => {
-            logger.info(`[変換完了(元画像)] ${displayPath}`);
+            // logger.info(`[変換完了(元画像)] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
             statsRecorder.record(originalSize);
             res.end();
             return resolve();
@@ -526,7 +536,7 @@ async function convertAndRespond({
               });
 
               fileStream.on("end", () => {
-                logger.info(`[変換完了(元画像)] ${displayPath}`);
+                // logger.info(`[変換完了(元画像)] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
                 statsRecorder.record(originalSize);
                 res.end();
                 return resolve();
@@ -630,7 +640,7 @@ async function convertAndRespond({
                 });
 
                 fileStream.on("end", () => {
-                  logger.info(`[変換完了(元画像)] ${displayPath}`);
+                  // logger.info(`[変換完了(元画像)] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
                   statsRecorder.record(originalSize);
                   res.end();
                   return resolve();
@@ -694,7 +704,7 @@ async function convertAndRespond({
               });
 
               fileStream.on("end", () => {
-                logger.info(`[変換完了(元画像)] ${displayPath}`);
+                // logger.info(`[変換完了(元画像)] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
                 statsRecorder.record(originalSize);
                 res.end();
                 return resolve();
@@ -1128,12 +1138,12 @@ async function convertHeicWithImageMagick({
     const memUsage = process.memoryUsage();
     const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
 
-    // HEIC変換開始の詳細ログ
-    logger.info(
-      `[HEIC変換開始] ${displayPath} → ${
-        cachePath ?? "(no cache)"
-      } (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal}, effort=${effortVal}, mode=${imageMode}) [メモリ: ${memUsageMB}MB]`
-    );
+    // HEIC変換開始の詳細ログ（パフォーマンス最適化のためコメントアウト）
+    // logger.info(
+    //   `[HEIC変換開始] ${displayPath} → ${
+    //     cachePath ?? "(no cache)"
+    //   } (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal}, effort=${effortVal}, mode=${imageMode}) [メモリ: ${memUsageMB}MB]`
+    // );
 
     /**
      * ImageMagickコマンドライン引数の構築（Sharpの設定を流用）
@@ -1281,7 +1291,7 @@ async function convertHeicWithImageMagick({
       });
 
       fileStream.on("end", () => {
-        logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+        // logger.info(`[HEIC変換完了(元画像)] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
         statsRecorder.record(originalSize);
         res.end();
         return resolve();
@@ -1355,7 +1365,7 @@ async function convertHeicWithImageMagick({
           });
 
           fileStream.on("end", () => {
-            logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+            // logger.info(`[HEIC変換完了(元画像)] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
             statsRecorder.record(originalSize);
             res.end();
             return resolve();
@@ -1447,7 +1457,7 @@ async function convertHeicWithImageMagick({
             });
 
             fileStream.on("end", () => {
-              logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+              // logger.info(`[HEIC変換完了(元画像)] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
               statsRecorder.record(originalSize);
               res.end();
               return resolve();
@@ -1499,7 +1509,7 @@ async function convertHeicWithImageMagick({
           });
 
           fileStream.on("end", () => {
-            logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+            // logger.info(`[HEIC変換完了(元画像)] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
             statsRecorder.record(originalSize);
             res.end();
             return resolve();
@@ -1629,10 +1639,537 @@ function createStatsRecorder(originalBytes) {
   };
 }
 
+/**
+ * キャッシュ専用の画像変換関数
+ * レスポンス送信を行わず、キャッシュファイルへの書き込みまたはメモリへの保存を実行
+ *
+ * @param {Object} params - 変換パラメータ
+ * @param {string} params.fullPath - 変換対象画像のフルパス
+ * @param {string} params.displayPath - 表示用パス（ログ出力用）
+ * @param {string} params.cachePath - キャッシュファイルパス（memoryOnly=trueの場合は使用されない）
+ * @param {number} params.quality - WebP変換品質（10-100）
+ * @param {number|null} params.Photo_Size - リサイズサイズ（null=リサイズなし）
+ * @param {number} params.originalSize - 元画像のサイズ
+ * @param {boolean} params.memoryOnly - メモリのみに保存（ディスクに保存しない）
+ * @param {Function} params.onMemoryCache - メモリキャッシュに保存するコールバック（memoryOnly=trueの場合）
+ *                                          (fullPath, stat, buffer) => void の形式
+ *
+ * @returns {Promise<Buffer|null>} 変換完了時にresolve（memoryOnly=trueの場合はBuffer、falseの場合はnull）
+ */
+async function convertAndCacheOnly({
+  fullPath,
+  displayPath,
+  cachePath,
+  quality,
+  Photo_Size,
+  originalSize,
+  memoryOnly = false,
+  onMemoryCache = null,
+}) {
+  const imageMode = getImageMode();
+  const isFast = imageMode === 1;
+  const fileExt = path.extname(fullPath).toLowerCase();
+  const isHeicImage = fileExt === ".heic" || fileExt === ".heif";
+
+  // HEIC画像の場合はImageMagickを使用
+  if (isHeicImage) {
+    return new Promise(async (resolve, reject) => {
+      const tmpPath = cachePath + `.tmp-${crypto.randomBytes(6).toString("hex")}`;
+      const effortVal = isFast ? getWebpEffortFast() : getWebpEffort();
+      const presetVal = getWebpPreset();
+      const reductionEffortVal = getWebpReductionEffort();
+
+      let resizeOpt = [];
+      if (Photo_Size) {
+        resizeOpt = ["-resize", `${Photo_Size}x`];
+      }
+
+      const webpOptions = [
+        "-quality",
+        `${quality}`,
+        "-define",
+        `webp:effort=${effortVal}`,
+        "-define",
+        `webp:preset=${presetVal}`,
+        "-define",
+        `webp:reduction-effort=${reductionEffortVal}`,
+        "-define",
+        "webp:near-lossless=false",
+      ];
+
+      if (!isFast) {
+        webpOptions.push("-define", "webp:smart-subsample=true");
+      }
+
+      const magick = spawn(MAGICK_CMD, [
+        fullPath,
+        ...resizeOpt,
+        ...webpOptions,
+        "webp:-",
+      ]);
+
+      magick.on("error", (err) => {
+        logger.error(`[キャッシュ専用HEIC変換失敗] ${fullPath}: ${err}`);
+        return reject(err);
+      });
+
+      try {
+        const tmpDir = path.dirname(tmpPath);
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+
+        if (memoryOnly) {
+          // メモリのみに保存（ディスクに保存しない）
+          const chunks = [];
+          magick.stdout.on("data", (chunk) => {
+            chunks.push(chunk);
+          });
+          magick.stdout.on("end", async () => {
+            const buffer = Buffer.concat(chunks);
+            if (onMemoryCache) {
+              // ファイル情報を取得してコールバックに渡す
+              try {
+                const stat = await fs.promises.stat(fullPath).catch(() => null);
+                if (stat) {
+                  onMemoryCache(fullPath, stat, buffer, cachePath);
+                }
+              } catch (e) {
+                // エラーは無視
+              }
+            }
+            // logger.info(`[キャッシュ専用HEIC変換完了（メモリのみ）] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
+            return resolve(buffer);
+          });
+          magick.stdout.on("error", (e) => {
+            logger.error(`[キャッシュ専用HEIC変換エラー] ${displayPath}: ${e.message}`);
+            return reject(e);
+          });
+        } else {
+          // ディスクに保存
+          const writeStream = fs.createWriteStream(tmpPath);
+          magick.stdout.pipe(writeStream);
+
+          writeStream.on("finish", () => {
+            fs.renameSync(tmpPath, cachePath);
+            // logger.info(`[キャッシュ専用HEIC変換完了] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
+            return resolve(null);
+          });
+
+          writeStream.on("error", (e) => {
+            logger.error(`[キャッシュ専用HEIC書き込みエラー] ${displayPath}: ${e.message}`);
+            return reject(e);
+          });
+        }
+
+        magick.on("close", (code) => {
+          if (code !== 0) {
+            logger.error(`[キャッシュ専用HEIC変換失敗] ${displayPath}: 終了コード ${code}`);
+            return reject(new Error(`ImageMagick exited with code ${code}`));
+          }
+        });
+      } catch (e) {
+        logger.error(`[キャッシュ専用HEIC変換エラー] ${displayPath}: ${e.message}`);
+        return reject(e);
+      }
+    });
+  }
+
+  // Sharpを使用した変換処理
+  return new Promise(async (resolve, reject) => {
+    const tmpPath = cachePath + `.tmp-${crypto.randomBytes(6).toString("hex")}`;
+    let transformer;
+
+    try {
+      transformer = sharp(fullPath, { limitInputPixels: getSharpPixelLimit() });
+
+      if (!isFast) {
+        transformer = transformer.rotate();
+      }
+
+      if (Photo_Size) {
+        if (isFast) {
+          transformer = transformer.resize({
+            width: Photo_Size,
+            withoutEnlargement: true,
+          });
+        } else {
+          const meta = await transformer.metadata();
+          if (meta.width != null && meta.height != null) {
+            if (meta.width < meta.height) {
+              transformer = transformer.resize({
+                width: Photo_Size,
+                withoutEnlargement: true,
+              });
+            } else {
+              transformer = transformer.resize({
+                height: Photo_Size,
+                withoutEnlargement: true,
+              });
+            }
+          }
+        }
+      }
+
+      const effortVal = isFast ? getWebpEffortFast() : getWebpEffort();
+      const presetVal = getWebpPreset();
+      const reductionEffortVal = getWebpReductionEffort();
+
+      const webpOptions = {
+        quality: quality,
+        effort: effortVal,
+        preset: presetVal,
+        reductionEffort: reductionEffortVal,
+        nearLossless: false,
+      };
+
+      if (!isFast) {
+        webpOptions.smartSubsample = true;
+      }
+
+      transformer = transformer.webp(webpOptions);
+
+      try {
+        const tmpDir = path.dirname(tmpPath);
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+
+        if (memoryOnly) {
+          // メモリのみに保存（ディスクに保存しない）
+          const chunks = [];
+          transformer.on("data", (chunk) => {
+            chunks.push(chunk);
+          });
+          transformer.on("end", async () => {
+            const buffer = Buffer.concat(chunks);
+            if (onMemoryCache) {
+              // ファイル情報を取得してコールバックに渡す
+              try {
+                const stat = await fs.promises.stat(fullPath).catch(() => null);
+                if (stat) {
+                  onMemoryCache(fullPath, stat, buffer, cachePath);
+                }
+              } catch (e) {
+                // エラーは無視
+              }
+            }
+            // logger.info(`[キャッシュ専用変換完了（メモリのみ）] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
+            return resolve(buffer);
+          });
+          transformer.on("error", (e) => {
+            logger.error(`[キャッシュ専用変換エラー] ${displayPath}: ${e.message}`);
+            return reject(e);
+          });
+        } else {
+          // ディスクに保存
+          const writeStream = fs.createWriteStream(tmpPath);
+          transformer.pipe(writeStream);
+
+          writeStream.on("finish", () => {
+            fs.renameSync(tmpPath, cachePath);
+            // logger.info(`[キャッシュ専用変換完了] ${displayPath}`); // パフォーマンス最適化のためコメントアウト
+            return resolve(null);
+          });
+
+          writeStream.on("error", (e) => {
+            logger.error(`[キャッシュ専用書き込みエラー] ${displayPath}: ${e.message}`);
+            return reject(e);
+          });
+        }
+      } catch (e) {
+        logger.error(`[キャッシュ専用変換エラー] ${displayPath}: ${e.message}`);
+        return reject(e);
+      }
+    } catch (e) {
+      logger.error(`[キャッシュ専用変換エラー] ${displayPath}: ${e.message}`);
+      return reject(e);
+    }
+  });
+}
+
+/**
+ * 連続プレビュー最適化: 前方Nファイルの事前変換・キャッシュ処理
+ * リクエストされた画像ファイルの次のN個をバックグラウンドで事前に変換・キャッシュして、
+ * 連続プレビュー時のレスポンス速度を向上させる
+ * 常にリクエストされた画像から5個先を事前変換することで、連続プレビューに最適化
+ *
+ * @param {Object} params - パラメータ
+ * @param {string} params.fullPath - 現在リクエストされたファイルのフルパス
+ * @param {string} params.displayPath - 表示用パス（ログ出力用）
+ * @param {string|null} params.activeCacheDir - キャッシュディレクトリパス
+ * @param {number} params.quality - WebP変換品質
+ * @param {number|null} params.Photo_Size - リサイズサイズ
+ * @param {number} params.cacheMinSize - キャッシュ対象の最小ファイルサイズ
+ * @param {Array<string>} params.imageExts - 画像拡張子リスト
+ * @param {number} params.prefetchCount - 事前変換するファイル数（前方のみ）
+ *
+ * @returns {Promise<void>} 処理完了時にresolve
+ */
+async function prefetchAdjacentImages({
+  fullPath,
+  displayPath,
+  activeCacheDir,
+  quality,
+  Photo_Size,
+  cacheMinSize,
+  imageExts,
+  prefetchCount = 5,
+  memoryOnly = false, // メモリのみに保存（ディスクに保存しない）
+  onMemoryCache = null, // メモリキャッシュに追加するコールバック
+  onFolderChange = null, // フォルダ変更時のコールバック（メモリキャッシュクリーンアップ用）
+}) {
+  // 画像変換機能が無効の場合はスキップ
+  if (!getImageConversionEnabled()) {
+    return;
+  }
+
+  // キャッシュディレクトリが無効の場合はスキップ
+  if (!activeCacheDir) {
+    return;
+  }
+
+  try {
+    // ディレクトリパスとファイル名を取得
+    const dirPath = path.dirname(fullPath);
+    const fileName = path.basename(fullPath);
+
+    // フォルダが変わった場合、前回のフォルダに関連するエントリを削除（メモリ解放）
+    if (lastPrefetchDirPath !== null && lastPrefetchDirPath !== dirPath) {
+      // 前回のフォルダに関連するエントリを削除
+      for (const [key] of activePrefetches.entries()) {
+        if (key.startsWith(lastPrefetchDirPath + "|")) {
+          activePrefetches.delete(key);
+        }
+      }
+      // フォルダ変更時のコールバックを実行（prefetchMemoryCacheのクリーンアップ用）
+      if (onFolderChange) {
+        onFolderChange(lastPrefetchDirPath);
+      }
+      // 先読み範囲をリセット
+      lastPrefetchedStartIndex = null;
+      lastPrefetchedEndIndex = null;
+    }
+    lastPrefetchDirPath = dirPath; // 現在のフォルダを記録
+
+    // 事前変換の重複チェック
+    const prefetchKey = `${dirPath}|${fileName}`;
+    const now = Date.now();
+    const lastPrefetchTime = activePrefetches.get(prefetchKey);
+
+    // 短時間内に同じファイルに対して事前変換が実行されている場合はスキップ
+    if (lastPrefetchTime && (now - lastPrefetchTime) < PREFETCH_COOLDOWN) {
+      // 重複をスキップ（ログなし）
+      return;
+    }
+
+    // 事前変換を実行中として記録
+    activePrefetches.set(prefetchKey, now);
+
+    // 古いエントリをクリーンアップ（メモリリーク防止：1000エントリを超えた場合のみ）
+    if (activePrefetches.size > 1000) {
+      for (const [key, timestamp] of activePrefetches.entries()) {
+        if (now - timestamp > PREFETCH_COOLDOWN * 10) {
+          activePrefetches.delete(key);
+        }
+      }
+    }
+
+    // ディレクトリ内のファイルリストを取得
+    let files;
+    try {
+      files = await fs.promises.readdir(dirPath);
+    } catch (e) {
+      logger.warn(`[連続プレビュー] ディレクトリ読み込み失敗: ${dirPath} - ${e.message}`);
+      return;
+    }
+
+    // ファイル名でソート（自然順序）
+    files.sort((a, b) => {
+      return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    });
+
+    // 現在のファイルのインデックスを取得
+    const currentIndex = files.indexOf(fileName);
+    if (currentIndex === -1) {
+      logger.warn(`[連続プレビュー] ファイルが見つかりません: ${fileName}`);
+      return;
+    }
+
+    let adjacentFiles = [];
+
+    // 最初の1回だけは50枚先読み、その後は1枚ずつ追加
+    if (lastPrefetchedEndIndex === null) {
+      // 最初の1回: 現在のファイルからprefetchCount個先まで一括先読み
+      const startIndex = currentIndex + 1; // 現在のファイルの次のファイルから開始
+      const endIndex = Math.min(files.length, currentIndex + prefetchCount + 1); // 最大prefetchCount個先まで
+      adjacentFiles = files.slice(startIndex, endIndex);
+      lastPrefetchedEndIndex = endIndex;
+      logger.info(`[連続プレビュー] 初期先読み開始: ${displayPath} (現在: ${currentIndex + 1}枚目, 先読み: ${adjacentFiles.length}枚, 範囲: ${startIndex + 1}-${endIndex}枚目)`);
+    } else {
+      // 2回目以降: 現在のファイルからprefetchCount個先の1枚だけ先読み
+      const targetIndex = currentIndex + prefetchCount;
+      
+      // 範囲外の場合はスキップ
+      if (targetIndex >= files.length) {
+        logger.info(`[連続プレビュー] 範囲外スキップ: ${displayPath} (現在: ${currentIndex + 1}枚目, 対象: ${targetIndex + 1}枚目, 総数: ${files.length}枚)`);
+        return;
+      }
+
+      // 既に先読み済みの範囲内にある場合は追加の先読みをスキップ
+      if (targetIndex < lastPrefetchedEndIndex) {
+        logger.info(`[連続プレビュー] 既に先読み済みスキップ: ${displayPath} (現在: ${currentIndex + 1}枚目, 対象: ${targetIndex + 1}枚目, 先読み済み範囲: 1-${lastPrefetchedEndIndex}枚目)`);
+        return;
+      }
+
+      // 先読み範囲を更新（常に先頭から50枚先の位置を維持）
+      lastPrefetchedEndIndex = targetIndex + 1;
+
+      // 先読み対象のファイル（1枚だけ）
+      const targetFile = files[targetIndex];
+      adjacentFiles = [targetFile]; // 1枚だけ先読み
+      logger.info(`[連続プレビュー] 追加先読み: ${displayPath} (現在: ${currentIndex + 1}枚目, 先読み: ${targetFile}, 対象: ${targetIndex + 1}枚目)`);
+    }
+
+    // 各ファイルをバックグラウンドで変換・キャッシュ
+    const prefetchPromises = adjacentFiles.map(async (file) => {
+      const adjacentPath = path.join(dirPath, file);
+      const ext = path.extname(adjacentPath).toLowerCase();
+
+      // 画像ファイルでない場合はスキップ
+      if (!imageExts.includes(ext)) {
+        logger.info(`[連続プレビュー] スキップ（画像ファイル以外）: ${file}`);
+        return;
+      }
+
+      try {
+        // ファイル統計情報を取得
+        const stat = await fs.promises.stat(adjacentPath).catch(() => null);
+        if (!stat || !stat.isFile()) {
+          // logger.info(`[連続プレビュー] スキップ（ファイルなし）: ${file}`); // パフォーマンス最適化のためコメントアウト
+          return;
+        }
+
+        // キャッシュ対象の最小サイズ未満の場合はスキップ（事前変換では無視）
+        // 事前変換では、ファイルサイズに関わらず変換を実行（連続プレビュー最適化のため）
+        // if (stat.size < cacheMinSize) {
+        //   return;
+        // }
+
+        // キャッシュキーを生成
+        const keyData =
+          adjacentPath +
+          "|" +
+          (Photo_Size ?? "o") +
+          "|" +
+          quality +
+          "|" +
+          String(stat.mtimeMs) +
+          "|" +
+          String(stat.size);
+        const key = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
+        const cachePath = path.join(activeCacheDir, key + ".webp");
+
+        // メモリのみの場合はディスクキャッシュの存在確認をスキップ
+        if (!memoryOnly) {
+          // キャッシュファイルが既に存在する場合はスキップ
+          try {
+            const cacheStat = await fs.promises.stat(cachePath).catch(() => null);
+            if (cacheStat && cacheStat.isFile()) {
+              logger.info(`[連続プレビュー] スキップ（既にキャッシュ済み）: ${file}`);
+              return; // 既にキャッシュされている
+            }
+          } catch (_) {
+            // キャッシュファイルの存在確認エラーは無視
+          }
+        }
+
+
+        // バックグラウンドで変換・キャッシュ処理を実行（優先度を下げるため、低優先度の並列制限を使用）
+        // Promiseを返して、実際の変換処理を実行
+        return (async () => {
+          try {
+            // in-flight重複チェック
+            const cacheKey = `${adjacentPath}-${quality}-${Photo_Size}`;
+            if (inFlightConversions.has(cacheKey)) {
+              return; // 既に変換中
+            }
+
+            // in-flight管理に追加
+            inFlightConversions.set(cacheKey, {
+              startTime: Date.now(),
+              displayPath: path.join(path.dirname(displayPath), file),
+            });
+
+            // メモリキャッシュに追加するコールバック（事前変換対象ファイルの情報を使用）
+            const memoryCacheCallback = onMemoryCache
+              ? (fullPathFromConvert, statFromConvert, buffer) => {
+                  // 事前変換対象ファイルの情報を使用（convertAndCacheOnlyから渡された情報を上書き）
+                  // prefetchAdjacentImages内で生成されたcachePathを渡す（リクエスト時と一致させるため）
+                  onMemoryCache(adjacentPath, stat, buffer, cachePath);
+                }
+              : null;
+
+            // 低優先度で変換実行（既存の並列制限を使用）
+            const adjacentDisplayPath = path.join(path.dirname(displayPath), file);
+            logger.info(`[連続プレビュー] 変換開始: ${adjacentDisplayPath}${memoryOnly ? " (メモリのみ)" : ""}`);
+            
+            await conversionLimit(async () => {
+              try {
+                // キャッシュファイルへの変換処理（レスポンス送信なし）
+                // memoryOnly=trueの場合はディスクに保存せず、メモリのみに保存
+                await convertAndCacheOnly({
+                  fullPath: adjacentPath,
+                  displayPath: adjacentDisplayPath,
+                  cachePath: cachePath,
+                  quality: quality,
+                  Photo_Size: Photo_Size,
+                  originalSize: stat.size,
+                  memoryOnly: memoryOnly,
+                  onMemoryCache: memoryCacheCallback, // メモリキャッシュに追加するコールバック
+                });
+                
+                logger.info(
+                  `[連続プレビュー] 変換完了: ${adjacentDisplayPath}${memoryOnly ? " (メモリのみ)" : ""}`
+                );
+              } catch (e) {
+                logger.warn(
+                  `[連続プレビュー] 変換失敗: ${adjacentDisplayPath} - ${e.message}`
+                );
+              } finally {
+                // in-flight管理から削除
+                inFlightConversions.delete(cacheKey);
+              }
+            });
+          } catch (e) {
+            logger.warn(
+              `[連続プレビュー] 事前変換エラー: ${path.join(path.dirname(displayPath), file)} - ${e.message}`
+            );
+            // in-flight管理から削除（エラー時）
+            const cacheKey = `${adjacentPath}-${quality}-${Photo_Size}`;
+            inFlightConversions.delete(cacheKey);
+          }
+        })();
+      } catch (e) {
+        // 個別ファイルの処理エラーは無視（ログのみ）
+        logger.warn(`[連続プレビュー] ファイル処理エラー: ${file} - ${e.message}`);
+      }
+    });
+
+    // すべての事前変換処理を開始（完了を待たない）
+    Promise.all(prefetchPromises).catch((e) => {
+      logger.warn(`[連続プレビュー] 事前変換処理エラー: ${e.message}`);
+    });
+  } catch (e) {
+    logger.warn(`[連続プレビュー] 処理エラー: ${displayPath} - ${e.message}`);
+  }
+}
+
 module.exports = {
   convertAndRespond,
   convertAndRespondWithLimit,
   convertHeicWithImageMagick,
   reinitializeConcurrency,
   stopInFlightMonitoring,
+  prefetchAdjacentImages,
 };

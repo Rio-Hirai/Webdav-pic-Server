@@ -6,6 +6,7 @@
         "certonly",
         "choco",
         "Conv",
+        "COOLDOWN",
         "cpus",
         "EACCES",
         "ENOENT",

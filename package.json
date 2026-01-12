@@ -16,12 +16,12 @@
     "stop:all": "taskkill /IM node.exe /F & timeout /t 2 /nobreak >nul & for /f \"tokens=5\" %i in ('netstat -ano ^| findstr :1900') do taskkill /PID %i /F",
     "status": "netstat -ano | findstr :1900",
     "monitor": "powershell -Command \"Get-Process node | Select-Object Id,ProcessName,CPU,WorkingSet | Format-Table\"",
-    "config:check": "type config.txt",
-    "config:edit": "notepad config.txt",
+    "config:check": "type config.json",
+    "config:edit": "notepad config.json",
     "logs": "powershell -Command \"Get-Content -Path '*.log' -Tail 50 -Wait\"",
     "test:performance": "curl -w '@curl-format.txt' -o /dev/null -s http://localhost:1900/test-image.jpg",
     "parallel:test": "powershell -Command \"1..10 | ForEach-Object { Start-Job { curl http://localhost:1900/test-image.jpg } } | Wait-Job | Receive-Job | Remove-Job\"",
-    "config:parallel": "powershell -Command \"Get-Content config.txt | Select-String 'MAX_CONCURRENCY|SHARP_MEMORY_LIMIT|SHARP_PIXEL_LIMIT'\"",
+    "config:parallel": "powershell -Command \"Get-Content config.json | Select-String 'MAX_CONCURRENCY|SHARP_MEMORY_LIMIT|SHARP_PIXEL_LIMIT'\"",
     "health:check": "curl -s http://localhost:1900/ | findstr \"WebDAV\""
   },
   "keywords": [

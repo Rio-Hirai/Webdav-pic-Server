@@ -46,7 +46,7 @@ const logger = {
 const MAGICK_CMD = process.env.MAGICK_PATH || "magick";
 
 // 設定ファイル監視と動的設定更新機能
-const CONFIG_FILE = path.join(__dirname, "..", "config.txt");
+const CONFIG_FILE = path.join(__dirname, "..", "config.json");
 const CONFIG_WATCH_INTERVAL = 10000; // 10秒間隔で設定ファイルを監視（より迅速な変更検出）
 
 // 前回の設定値を保存するオブジェクト
@@ -70,7 +70,8 @@ function validateConfigValue(key, value, defaultValue) {
     key.includes("WINDOW") ||
     key.includes("QUEUE") ||
     key.includes("TIMEOUT") ||
-    key.includes("ACTIVE")
+    key.includes("ACTIVE") ||
+    key.includes("FILES")
   ) {
     const numValue = parseInt(value);
 
@@ -206,7 +207,7 @@ function validateConfigValue(key, value, defaultValue) {
 
   // 真偽値型の設定検証
   if (key.includes("ENABLED")) {
-    const lowerValue = value.toLowerCase();
+    const lowerValue = String(value).toLowerCase();
     if (lowerValue !== "true" && lowerValue !== "false") {
       logger.warn(
         `[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (真偽値はtrue/false)`
@@ -251,12 +252,29 @@ function validateConfigValue(key, value, defaultValue) {
     return value.trim();
   }
 
+  // その他数値型の設定検証
+  if (
+    key === "IMAGE_MODE" ||
+    key === "WEBP_EFFORT" ||
+    key === "WEBP_EFFORT_FAST" ||
+    key === "WEBP_REDUCTION_EFFORT"
+  ) {
+    const numValue = parseInt(value);
+    if (isNaN(numValue) || numValue < 0) {
+      logger.warn(
+        `[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (数値が無効)`
+      );
+      return defaultValue;
+    }
+    return numValue;
+  }
+
   return value;
 }
 
 /**
  * 動的設定読み込み関数
- * config.txtから設定を読み込み、環境変数を動的に更新
+ * config.jsonから設定を読み込み、環境変数を動的に更新
  */
 function getDynamicConfig(key, defaultValue) {
   const value = process.env[key];
@@ -278,35 +296,33 @@ function getDynamicConfig(key, defaultValue) {
 
 /**
  * 設定ファイル読み込み関数
- * config.txtから設定を読み込み、環境変数を動的に更新（差分のみログ出力）
+ * config.jsonから設定を読み込み、環境変数を動的に更新（差分のみログ出力）
  */
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       const configContent = fs.readFileSync(CONFIG_FILE, "utf8");
-      const lines = configContent.split("\n");
-      let updatedCount = 0;
-      const currentConfigValues = {};
 
-      // 現在の設定値を読み込み
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith("#")) {
-          const [key, value] = trimmed.split("=");
-          if (key && value !== undefined) {
-            const keyTrimmed = key.trim();
-            const valueTrimmed = value.trim();
-            currentConfigValues[keyTrimmed] = valueTrimmed;
-          }
-        }
+      let currentConfigValues;
+      try {
+        currentConfigValues = JSON.parse(configContent);
+      } catch (e) {
+        logger.warn(`[設定読み込みエラー] JSONパース失敗: ${e.message}`);
+        return { sharpConfigChanged: false };
       }
 
+      let updatedCount = 0;
+      let sharpConfigChanged = false;
+
       // 前回の設定値と比較して差分を検出
-      for (const [key, value] of Object.entries(currentConfigValues)) {
+      for (const [key, rawValue] of Object.entries(currentConfigValues)) {
+        // process.env には文字列として保存する必要があるが、JSONからは数値やbooleanが来るので文字列化
+        const value = String(rawValue);
+
         // 値が変更された場合のみ更新
         if (lastConfigValues[key] !== value) {
-          // 環境変数には文字列として保存（getDynamicConfigで適切に型変換）
           process.env[key] = value;
+
           if (lastConfigValues[key] !== undefined) {
             // 既存設定の変更
             logger.info(
@@ -436,12 +452,26 @@ function loadConfig() {
                   value === "true" ? "有効" : "無効"
                 } に変更されました`
               );
+            } else if (key === "IMAGE_MODE") {
+              logger.info(
+                `[画像処理モード設定更新] 画像処理モードが ${value} に変更されました`
+              );
             }
           } else {
             // 新規設定の追加
             logger.info(`[設定追加] ${key}=${value}`);
           }
+
           updatedCount++;
+
+          // Sharp関連の設定変更検出
+          if (
+            key === "MAX_CONCURRENCY" ||
+            key === "SHARP_MEMORY_LIMIT" ||
+            key === "SHARP_PIXEL_LIMIT"
+          ) {
+            sharpConfigChanged = true;
+          }
         }
       }
 
@@ -453,29 +483,18 @@ function loadConfig() {
         }
       }
 
-      // 前回の設定値を更新
-      lastConfigValues = { ...currentConfigValues };
+      // 前回の設定値を更新（型を文字列に合わせて保存）
+      lastConfigValues = {};
+      for (const [k, v] of Object.entries(currentConfigValues)) {
+        lastConfigValues[k] = String(v);
+      }
 
       // 変更があった場合のみサマリーログを出力
       if (updatedCount > 0) {
         logger.info(`[設定監視] ${updatedCount}個の設定を更新しました`);
-
-        // Sharp関連の設定が変更された場合はSharpの設定を再適用
-        const sharpRelatedKeys = [
-          "MAX_CONCURRENCY",
-          "SHARP_MEMORY_LIMIT",
-          "SHARP_PIXEL_LIMIT",
-        ];
-        const hasSharpChanges = Object.keys(currentConfigValues).some(
-          (key) =>
-            sharpRelatedKeys.includes(key) &&
-            lastConfigValues[key] !== currentConfigValues[key]
-        );
-        if (hasSharpChanges) {
-          // Sharp設定の再適用は呼び出し元で行う
-          return { sharpConfigChanged: true };
-        }
       }
+
+      return { sharpConfigChanged };
     } else {
       // ファイルが見つからない場合のみ警告（初回以外は抑制）
       if (Object.keys(lastConfigValues).length > 0) {
@@ -492,8 +511,6 @@ function loadConfig() {
 // 初期設定読み込み
 loadConfig();
 
-// 設定ファイル監視開始
-// 注: Sharp設定の再適用はmain.jsの監視ループで実行
 // 設定ファイル監視開始
 // 注: Sharp設定の再適用はmain.jsの監視ループで実行
 let configWatchIntervalId = setInterval(() => {
@@ -576,7 +593,7 @@ const getSSLCertPath = () => getDynamicConfig("SSL_CERT_PATH", ""); // SSL証明
 const getSSLKeyPath = () => getDynamicConfig("SSL_KEY_PATH", ""); // SSL秘密鍵パス
 
 // 画像処理モード設定読み込み関数
-const getImageMode = () => getDynamicConfig("IMAGE_MODE", 2); // 画像処理モード（1=高速処理、2=バランス処理、3=高圧縮処理）
+const getImageMode = () => parseInt(getDynamicConfig("IMAGE_MODE", 2)); // 画像処理モード（1=高速処理、2=バランス処理、3=高圧縮処理）
 
 // WebP effort 設定 (0-9)
 const getWebpEffort = () => parseInt(getDynamicConfig("WEBP_EFFORT", 1)); // デフォルト 1 (バランス)

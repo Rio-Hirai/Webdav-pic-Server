@@ -43,6 +43,9 @@ const {
   pipeline: helperPipeline,
 } = require("./image-magick-helper");
 
+// メモリキャッシュモジュール
+const { memoryCache } = require("./memory-cache");
+
 const PassThrough = stream.PassThrough; // パススルー
 const pipeline = promisify(stream.pipeline); // パイプライン
 
@@ -80,6 +83,7 @@ async function convertAndRespondWithLimit(params) {
     Photo_Size, // リサイズサイズ（null=リサイズなし）
     res, // HTTPレスポンスオブジェクト
     clientIP, // クライアントIP
+    originalSize, // 元画像サイズ
   } = params; // パラメータを分解
 
   // キャッシュキー生成（重複変換検出用）
@@ -87,7 +91,7 @@ async function convertAndRespondWithLimit(params) {
 
   // in-flight重複チェック
   if (inFlightConversions.has(cacheKey)) {
-    logger.info(`[重複変換防止] 同じ画像の変換が進行中: ${displayPath}`);
+    // logger.info(`[重複変換防止] 同じ画像の変換が進行中: ${displayPath}`);
 
     // 既存の変換完了を待つ
     return new Promise((resolve) => {
@@ -177,7 +181,7 @@ async function convertAndRespond({
   const isHeicImage = fileExt === ".heic" || fileExt === ".heif";
 
   if (isHeicImage) {
-    logger.info(`[HEIC画像検出] ImageMagickに直接ルーティング: ${displayPath}`);
+    // logger.info(`[HEIC画像検出] ImageMagickに直接ルーティング: ${displayPath}`);
     return convertHeicWithImageMagick({
       fullPath,
       displayPath,
@@ -306,20 +310,20 @@ async function convertAndRespond({
       const pixelLimit = getSharpPixelLimit();
 
       // 初回のみ詳細ログを出力
-      if (!global.imageConversionLogged) {
-        logger.info(
-          `[変換実行] ${displayPath} → ${
-            cachePath ?? "(no cache)"
-          } (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal}) [メモリ: ${memUsageMB}MB, ピクセル制限: ${pixelLimit} (型: ${typeof pixelLimit})]`
-        );
-        global.imageConversionLogged = true;
-      } else {
-        logger.info(
-          `[変換実行] ${displayPath} → ${
-            cachePath ?? "(no cache)"
-          } (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal})`
-        );
-      }
+      // if (!global.imageConversionLogged) {
+      //   logger.info(
+      //     `[変換実行] ${displayPath} → ${
+      //       cachePath ?? "(no cache)"
+      //     } (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal}) [メモリ: ${memUsageMB}MB, ピクセル制限: ${pixelLimit} (型: ${typeof pixelLimit})]`
+      //   );
+      //   global.imageConversionLogged = true;
+      // } else {
+      //   logger.info(
+      //     `[変換実行] ${displayPath} → ${
+      //       cachePath ?? "(no cache)"
+      //     } (q=${quality}, preset=${presetVal}, reductionEffort=${reductionEffortVal})`
+      //   );
+      // }
 
       /**
        * ストリーミング処理の設定
@@ -539,10 +543,14 @@ async function convertAndRespond({
             magickResponseSize += chunk.length; // レスポンスサイズを累計
           });
           magick.stdout.on("end", () => {
-            logger.info(
-              `[変換完了(ImageMagick)] ${displayPath} (サイズ: ${magickResponseSize.toLocaleString()} bytes)`
-            ); // ImageMagick変換完了ログを出力
+            // logger.info(
+            //   `[変換完了(ImageMagick)] ${displayPath} (サイズ: ${magickResponseSize.toLocaleString()} bytes)`
+            // ); // ImageMagick変換完了ログを出力
             statsRecorder.record(magickResponseSize);
+            const originalSizeForLog = originalSize || 0;
+            logger.info(
+              `[通信量] ${displayPath} - 送信: ${(magickResponseSize / 1024).toFixed(1)} KB (元: ${(originalSizeForLog / 1024).toFixed(1)} KB, 圧縮率: ${originalSizeForLog > 0 ? ((1 - magickResponseSize / originalSizeForLog) * 100).toFixed(1) : 0}%, ImageMagick変換後)`
+            );
             res.end(); // レスポンスを終了
             return resolve(); // 呼び出し元に完了を伝播
           });
@@ -620,6 +628,10 @@ async function convertAndRespond({
        * - エラー回復: 書き込み失敗時の適切なクリーンアップ
        * - ストリーミング: データ受信と同時のキャッシュ書き込み
        */
+      // メモリキャッシュ用のバッファ（すべての画像を対象）
+      const memoryCacheBuffer = [];
+      let memoryCacheBufferSize = 0;
+
       if (tmpPath) {
         const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルへの書き込みストリーム
         let wroteAny = false; // データ書き込みフラグ
@@ -637,6 +649,12 @@ async function convertAndRespond({
           }
           wroteAny = true; // データが書き込まれたことを記録
           responseSize += chunk.length; // レスポンスサイズを累計
+
+          // メモリキャッシュ用バッファに蓄積（最大10MBまで）
+          if (memoryCacheBufferSize < 10 * 1024 * 1024) {
+            memoryCacheBuffer.push(chunk);
+            memoryCacheBufferSize += chunk.length;
+          }
         });
 
         // ストリーミング処理の設定（エラーハンドリング付き）
@@ -659,13 +677,13 @@ async function convertAndRespond({
           // レスポンスエラー時は適切に終了
         }); // レスポンス送信
 
-        // ストリーム終了時の処理
+          // ストリーム終了時の処理
         pass.on("end", async () => {
           // Sharp変換タイムアウトをクリア
           clearTimeout(sharpTimeout);
 
-          // 原子的キャッシュ更新処理
-          if (wroteAny) {
+          // 原子的キャッシュ更新処理（ファイルキャッシュ用）
+          if (wroteAny && tmpPath && cachePath) {
             try {
               await fs.promises.rename(tmpPath, cachePath).catch(async (e) => {
                 // 一時ファイルをキャッシュファイルにリネーム
@@ -678,25 +696,70 @@ async function convertAndRespond({
             } catch (e) {
               logger.warn("[cache rename outer error]", e); // リネーム失敗は警告ログを出力
             }
-          } else {
+          } else if (tmpPath) {
             // データが書き込まれていない場合は一時ファイルを削除
             try {
               await fs.promises.unlink(tmpPath).catch(() => {}); // 存在しない場合は無視
             } catch (_) {}
           }
 
-          logger.info(
-            `[変換完了(Sharp)] ${displayPath} (サイズ: ${responseSize.toLocaleString()} bytes)`
-          ); // Sharp変換完了ログを出力
+          // メモリキャッシュに保存（ファイルキャッシュの有無に関係なく実行）
+          try {
+            const folderPath = path.dirname(fullPath);
+            // キャッシュキーを生成（webdav.jsと同じロジック）
+            const keyData =
+              fullPath +
+              "|" +
+              (Photo_Size ?? "o") +
+              "|" +
+              quality +
+              "|" +
+              String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
+              "|" +
+              String(originalSize);
+            const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
+
+            // メモリキャッシュ用データを取得
+            let cacheData = null;
+            if (cachePath && fs.existsSync(cachePath)) {
+              // ファイルキャッシュが存在する場合はそこから読み込む
+              cacheData = await fs.promises.readFile(cachePath).catch(() => null);
+            } else if (memoryCacheBuffer.length > 0 && memoryCacheBufferSize > 0) {
+              // ファイルキャッシュがない場合は、バッファに蓄積したデータを使用
+              cacheData = Buffer.concat(memoryCacheBuffer, memoryCacheBufferSize);
+            }
+
+            if (cacheData) {
+              memoryCache.set(folderPath, cacheKey, cacheData);
+              // logger.info(
+              //   `[メモリキャッシュ保存] ${path.basename(fullPath)} - サイズ: ${cacheData.length.toLocaleString()} bytes`
+              // );
+            }
+          } catch (memCacheErr) {
+            // メモリキャッシュ保存エラーは無視（ログのみ）
+            logger.warn(`[メモリキャッシュ保存エラー] ${displayPath}: ${memCacheErr.message}`);
+          }
+
+          // logger.info(
+          //   `[変換完了(Sharp)] ${displayPath} (サイズ: ${responseSize.toLocaleString()} bytes)`
+          // ); // Sharp変換完了ログを出力
           statsRecorder.record(responseSize);
+          const originalSizeForLog = originalSize || 0;
+          logger.info(
+            `[通信量] ${displayPath} - 送信: ${(responseSize / 1024).toFixed(1)} KB (元: ${(originalSizeForLog / 1024).toFixed(1)} KB, 圧縮率: ${originalSizeForLog > 0 ? ((1 - responseSize / originalSizeForLog) * 100).toFixed(1) : 0}%, 変換後)`
+          );
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
         });
       } else {
         /**
          * キャッシュなしの場合の処理
-         * 直接レスポンスにストリーミング
+         * 直接レスポンスにストリーミング（メモリキャッシュ用バッファも蓄積）
          */
+        // メモリキャッシュ用のバッファ（すべての画像を対象）
+        const memoryCacheBufferNoCache = [];
+        let memoryCacheBufferSizeNoCache = 0;
+
         pass.on("data", (chunk) => {
           if (!wroteHeader) {
             // 最初のチャンク受信時にHTTPヘッダー送信（チャンク転送）
@@ -709,6 +772,12 @@ async function convertAndRespond({
             wroteHeader = true; // ヘッダー送信フラグを設定
           }
           responseSize += chunk.length; // レスポンスサイズを累計
+
+          // メモリキャッシュ用バッファに蓄積（最大10MBまで）
+          if (memoryCacheBufferSizeNoCache < 10 * 1024 * 1024) {
+            memoryCacheBufferNoCache.push(chunk);
+            memoryCacheBufferSizeNoCache += chunk.length;
+          }
         });
 
         pipeline(pass, res).catch((e) => {
@@ -722,14 +791,42 @@ async function convertAndRespond({
         }); // レスポンス送信
 
         // ストリーム終了時の処理
-
-        pass.on("end", () => {
+        pass.on("end", async () => {
           // Sharp変換タイムアウトをクリア
           clearTimeout(sharpTimeout);
 
-          logger.info(
-            `[変換完了(Sharp)] ${fullPath} (サイズ: ${responseSize.toLocaleString()} bytes)`
-          ); // Sharp変換完了ログを出力
+          // メモリキャッシュに保存（ファイルキャッシュなしでも実行）
+          try {
+            const folderPath = path.dirname(fullPath);
+            // キャッシュキーを生成（webdav.jsと同じロジック）
+            const keyData =
+              fullPath +
+              "|" +
+              (Photo_Size ?? "o") +
+              "|" +
+              quality +
+              "|" +
+              String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
+              "|" +
+              String(originalSize);
+            const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
+
+            // バッファに蓄積したデータを使用
+            if (memoryCacheBufferNoCache.length > 0 && memoryCacheBufferSizeNoCache > 0) {
+              const cacheData = Buffer.concat(memoryCacheBufferNoCache, memoryCacheBufferSizeNoCache);
+              memoryCache.set(folderPath, cacheKey, cacheData);
+              // logger.info(
+              //   `[メモリキャッシュ保存] ${path.basename(fullPath)} - サイズ: ${cacheData.length.toLocaleString()} bytes`
+              // );
+            }
+          } catch (memCacheErr) {
+            // メモリキャッシュ保存エラーは無視（ログのみ）
+            logger.warn(`[メモリキャッシュ保存エラー] ${displayPath}: ${memCacheErr.message}`);
+          }
+
+          // logger.info(
+          //   `[変換完了(Sharp)] ${fullPath} (サイズ: ${responseSize.toLocaleString()} bytes)`
+          // ); // Sharp変換完了ログを出力
           statsRecorder.record(responseSize);
           res.end(); // レスポンスを終了
           return resolve(); // 呼び出し元に完了を伝播
@@ -1017,8 +1114,11 @@ async function convertHeicWithImageMagick({
             return reject(streamErr);
           });
           fileStream.on("end", () => {
-            logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+            // logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
             statsRecorder.record(originalSize);
+            logger.info(
+              `[通信量] ${displayPath} - 送信: ${(originalSize / 1024).toFixed(1)} KB (HEIC元画像)`
+            );
             res.end();
             return resolve();
           });
@@ -1078,7 +1178,7 @@ async function convertHeicWithImageMagick({
               return reject(streamErr);
             });
             fileStream.on("end", () => {
-              logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+              // logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
               statsRecorder.record(originalSize);
               res.end();
               return resolve();
@@ -1109,8 +1209,11 @@ async function convertHeicWithImageMagick({
             return reject(streamErr);
           });
           fileStream.on("end", () => {
-            logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
+            // logger.info(`[HEIC変換完了(元画像)] ${displayPath}`);
             statsRecorder.record(originalSize);
+            logger.info(
+              `[通信量] ${displayPath} - 送信: ${(originalSize / 1024).toFixed(1)} KB (HEIC元画像)`
+            );
             res.end();
             return resolve();
           });

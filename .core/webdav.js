@@ -29,11 +29,24 @@ const {
   getServerRootPath, // サーバールートパス - WebDAVサーバーのルートディレクトリパス
   getSSLCertPath, // SSL証明書パス - SSL証明書ファイルのパス
   getSSLKeyPath, // SSL秘密鍵パス - SSL秘密鍵ファイルのパス
+  getImageMode, // 画像処理モード
+  getWebpEffort, // WebP effort 設定
+  getWebpEffortFast, // WebP effort fast 設定
+  getWebpPreset, // WebP preset 設定
+  getWebpReductionEffort, // WebP reduction effort 設定
+  getSharpPixelLimit, // Sharpピクセル制限
 } = require("./config"); // 設定管理モジュール
 
 // 画像変換モジュール
 const { convertAndRespond, convertAndRespondWithLimit } = require("./image"); // 画像変換モジュール
-const { recordImageTransfer, recordTextCompression, getStatsSnapshot } = require("./stats");
+const {
+  recordImageTransfer,
+  recordTextCompression,
+  getStatsSnapshot,
+} = require("./stats");
+
+// メモリキャッシュモジュール
+const { memoryCache, preloadFolderImages } = require("./memory-cache");
 
 const PassThrough = stream.PassThrough; // ストリーム処理 - PassThrough、pipeline等のストリーム操作、メモリ効率化
 const pipeline = promisify(stream.pipeline); // ストリーム処理 - PassThrough、pipeline等のストリーム操作、メモリ効率化
@@ -129,7 +142,10 @@ function startWebDAV(activeCacheDir) {
       const dirHandle = fs.opendirSync(dir); // 同期opendir（Dirオブジェクトを返す）
       let entry; // Dirオブジェクトのエントリ
       // MAX_LIST件まで読み込み（メモリ使用量制限）
-      while ((entry = dirHandle.readSync()) !== null && names.length < getMaxList()) {
+      while (
+        (entry = dirHandle.readSync()) !== null &&
+        names.length < getMaxList()
+      ) {
         names.push(entry.name); // ファイル名を配列に追加
       }
       dirHandle.closeSync(); // Dirオブジェクトをクローズ
@@ -275,7 +291,8 @@ function startWebDAV(activeCacheDir) {
   server.beforeRequest((ctx, next) => {
     if (ctx.request.method === "PROPFIND") {
       const depthHeader = ctx.request.headers["depth"]; // Depthヘッダー取得
-      const depth = (Array.isArray(depthHeader) ? depthHeader[0] : depthHeader) || "1"; // デフォルトは"1"
+      const depth =
+        (Array.isArray(depthHeader) ? depthHeader[0] : depthHeader) || "1"; // デフォルトは"1"
 
       if (depth.toLowerCase() === "infinity") {
         ctx.setCode(403); // 403 Forbiddenを設定
@@ -330,7 +347,9 @@ function startWebDAV(activeCacheDir) {
             return callback(null, limited); // 制限後の配列を返す
           } catch (e) {
             // キャッシュ保存エラーの場合
-            logger.warn(`[キャッシュ保存エラー] _readdir ${path}: ${e.message}`);
+            logger.warn(
+              `[キャッシュ保存エラー] _readdir ${path}: ${e.message}`
+            );
           }
         } // エラーがなく配列の場合はMAX_LIST件までに制限
         callback(err, names); // エラーまたはキャッシュ保存失敗時はそのまま返す
@@ -374,274 +393,192 @@ function startWebDAV(activeCacheDir) {
    * 注意: ここでfsの同期/非同期関数をラップしてプロセス内でキャッシュを使うように差し替える
    * 他モジュールも同じprocessのfsを参照するため副作用が発生する可能性がある
    */
-  server.setFileSystem("/", new CachedFileSystem(ROOT_PATH, dirCache, statCache), (success) => {
-    if (!success) {
-      logger.error(`マウント失敗`);
-      process.exit(1);
-    }
-
-    /**
-     * HTTPサーバー関連の初期化
-     * 注意: グローバルなfs関数の置き換えは副作用を避けるため削除
-     * CachedFileSystemクラス内でラッパー関数を使用することで、グローバル変数の副作用を回避
-     */
-
-    // スタック処理システムでは複雑なin-flight管理は不要（順次処理のため）
-
-    /**
-     * セキュアなパス解決関数
-     * パストラバーサル攻撃を防ぎ、指定されたルートディレクトリ内のパスのみアクセスを許可
-     *
-     * @param {string} root - ルートディレクトリパス
-     * @param {string} urlPath - URLから取得したパス
-     * @returns {string} 解決された安全なパス
-     * @throws {Error} アクセスが拒否された場合
-     *
-     * 技術的詳細:
-     * - パストラバーサル対策: "../"等の危険なパス要素を検出
-     * - プラットフォーム対応: Windows/Unix系のパス区切り文字に対応
-     * - 大文字小文字: Windowsでは大文字小文字を区別しない比較
-     * - 正規化: path.resolveによる絶対パス化と正規化
-     */
-    const safeResolve = (root, urlPath) => {
-      const decoded = decodeURIComponent(urlPath || ""); // URLデコード
-      // クエリパラメータを削除して先頭のスラッシュを削除
-      const rel = decoded.split("?")[0].replace(/^\/+/, ""); // 相対パス部分
-      const candidate = path.resolve(root, rel); // 相対パスを絶対パスに解決
-      const rootResolved = path.resolve(root); // ルートパスを絶対パスに解決
-
-      // プラットフォームによって異なるパス比較（Windowsは大文字小文字を区別しない）
-      if (process.platform === "win32") {
-        const lc = candidate.toLowerCase(); // 小文字化
-        const rr = rootResolved.toLowerCase(); // 小文字化
-        if (!(lc === rr || lc.startsWith(rr + path.sep))) throw new Error("Access denied"); // パスが一致しない場合はアクセス拒否
-      } else {
-        if (!(candidate === rootResolved || candidate.startsWith(rootResolved + path.sep))) throw new Error("Access denied"); // パスが一致しない場合はアクセス拒否
+  server.setFileSystem(
+    "/",
+    new CachedFileSystem(ROOT_PATH, dirCache, statCache),
+    (success) => {
+      if (!success) {
+        logger.error(`マウント失敗`);
+        process.exit(1);
       }
-      return candidate; // 安全なパスを返す
-    };
 
-    /**
-     * Content-Type判定関数
-     * ファイル拡張子に基づいて適切なMIMEタイプを返す
-     *
-     * @param {string} ext - ファイル拡張子
-     * @returns {string} MIMEタイプ
-     */
-    const getContentType = (ext) => {
-      const contentTypes = {
-        // MIMEタイプ
-        ".html": "text/html; charset=utf-8", // HTMLファイル
-        ".htm": "text/html; charset=utf-8", // HTMLファイル
-        ".css": "text/css; charset=utf-8", // CSSファイル
-        ".js": "application/javascript; charset=utf-8", // JavaScriptファイル
-        ".json": "application/json; charset=utf-8", // JSONファイル
-        ".xml": "application/xml; charset=utf-8", // XMLファイル
-        ".txt": "text/plain; charset=utf-8", // テキストファイル
-        ".md": "text/markdown; charset=utf-8", // Markdownファイル
-        ".svg": "image/svg+xml; charset=utf-8", // SVGファイル
-        ".png": "image/png", // PNGファイル
-        ".webp": "image/webp", // WebPファイル
+      /**
+       * HTTPサーバー関連の初期化
+       * 注意: グローバルなfs関数の置き換えは副作用を避けるため削除
+       * CachedFileSystemクラス内でラッパー関数を使用することで、グローバル変数の副作用を回避
+       */
+
+      // スタック処理システムでは複雑なin-flight管理は不要（順次処理のため）
+
+      /**
+       * セキュアなパス解決関数
+       * パストラバーサル攻撃を防ぎ、指定されたルートディレクトリ内のパスのみアクセスを許可
+       *
+       * @param {string} root - ルートディレクトリパス
+       * @param {string} urlPath - URLから取得したパス
+       * @returns {string} 解決された安全なパス
+       * @throws {Error} アクセスが拒否された場合
+       *
+       * 技術的詳細:
+       * - パストラバーサル対策: "../"等の危険なパス要素を検出
+       * - プラットフォーム対応: Windows/Unix系のパス区切り文字に対応
+       * - 大文字小文字: Windowsでは大文字小文字を区別しない比較
+       * - 正規化: path.resolveによる絶対パス化と正規化
+       */
+      const safeResolve = (root, urlPath) => {
+        const decoded = decodeURIComponent(urlPath || ""); // URLデコード
+        // クエリパラメータを削除して先頭のスラッシュを削除
+        const rel = decoded.split("?")[0].replace(/^\/+/, ""); // 相対パス部分
+        const candidate = path.resolve(root, rel); // 相対パスを絶対パスに解決
+        const rootResolved = path.resolve(root); // ルートパスを絶対パスに解決
+
+        // プラットフォームによって異なるパス比較（Windowsは大文字小文字を区別しない）
+        if (process.platform === "win32") {
+          const lc = candidate.toLowerCase(); // 小文字化
+          const rr = rootResolved.toLowerCase(); // 小文字化
+          if (!(lc === rr || lc.startsWith(rr + path.sep)))
+            throw new Error("Access denied"); // パスが一致しない場合はアクセス拒否
+        } else {
+          if (
+            !(
+              candidate === rootResolved ||
+              candidate.startsWith(rootResolved + path.sep)
+            )
+          )
+            throw new Error("Access denied"); // パスが一致しない場合はアクセス拒否
+        }
+        return candidate; // 安全なパスを返す
       };
-      return contentTypes[ext.toLowerCase()] || "application/octet-stream"; // MIMEタイプを返す
-    };
 
-    /**
-     * SSL証明書の読み込み
-     * 証明書と秘密鍵ファイルを読み込んでHTTPSサーバー用のオプションを生成
-     *
-     * @returns {Object|null} SSLオプション（証明書が設定されている場合）、null（証明書未設定の場合）
-     */
-    const loadSSLOptions = () => {
-      const certPath = getSSLCertPath();
-      const keyPath = getSSLKeyPath();
+      /**
+       * Content-Type判定関数
+       * ファイル拡張子に基づいて適切なMIMEタイプを返す
+       *
+       * @param {string} ext - ファイル拡張子
+       * @returns {string} MIMEタイプ
+       */
+      const getContentType = (ext) => {
+        const contentTypes = {
+          // MIMEタイプ
+          ".html": "text/html; charset=utf-8", // HTMLファイル
+          ".htm": "text/html; charset=utf-8", // HTMLファイル
+          ".css": "text/css; charset=utf-8", // CSSファイル
+          ".js": "application/javascript; charset=utf-8", // JavaScriptファイル
+          ".json": "application/json; charset=utf-8", // JSONファイル
+          ".xml": "application/xml; charset=utf-8", // XMLファイル
+          ".txt": "text/plain; charset=utf-8", // テキストファイル
+          ".md": "text/markdown; charset=utf-8", // Markdownファイル
+          ".svg": "image/svg+xml; charset=utf-8", // SVGファイル
+          ".png": "image/png", // PNGファイル
+          ".webp": "image/webp", // WebPファイル
+        };
+        return contentTypes[ext.toLowerCase()] || "application/octet-stream"; // MIMEタイプを返す
+      };
 
-      // 証明書が設定されていない場合はHTTPのまま
-      if (!certPath || !keyPath || certPath.trim() === "" || keyPath.trim() === "") {
-        return null;
-      }
+      /**
+       * SSL証明書の読み込み
+       * 証明書と秘密鍵ファイルを読み込んでHTTPSサーバー用のオプションを生成
+       *
+       * @returns {Object|null} SSLオプション（証明書が設定されている場合）、null（証明書未設定の場合）
+       */
+      const loadSSLOptions = () => {
+        const certPath = getSSLCertPath();
+        const keyPath = getSSLKeyPath();
 
-      try {
-        // 証明書ファイルの存在確認
-        if (!fs.existsSync(certPath)) {
-          logger.warn(`[SSL] 証明書ファイルが見つかりません: ${certPath}`);
-          return null;
-        }
-        if (!fs.existsSync(keyPath)) {
-          logger.warn(`[SSL] 秘密鍵ファイルが見つかりません: ${keyPath}`);
-          return null;
-        }
-
-        // 証明書と秘密鍵を読み込む
-        const cert = fs.readFileSync(certPath, "utf8");
-        const key = fs.readFileSync(keyPath, "utf8");
-
-        logger.info(`[SSL] 証明書を読み込みました: ${certPath}`);
-        return { cert, key };
-      } catch (e) {
-        logger.error(`[SSL] 証明書の読み込みに失敗しました: ${e.message}`);
-        return null;
-      }
-    };
-
-    const sslOptions = loadSSLOptions();
-    const useHTTPS = sslOptions !== null;
-
-    /**
-     * HTTP/HTTPSサーバーの作成
-     * 画像変換機能付きのHTTP/HTTPSサーバーを起動し、WebDAVリクエストと画像変換リクエストを処理
-     *
-     * 技術的詳細:
-     * - ハイブリッド処理: WebDAVと画像変換の両方を単一サーバーで処理
-     * - SSL/TLS対応: 証明書が設定されている場合はHTTPS、未設定の場合はHTTP
-     * - 拡張子判定: 画像ファイルの自動検出と変換処理の分岐
-     * - ストリーミング: 大容量ファイルの効率的な転送
-     * - エラーハンドリング: 各処理段階での適切なエラー応答
-     */
-    const httpServer = (useHTTPS ? https : http).createServer(
-      useHTTPS ? sslOptions : undefined,
-      async (req, res) => {
-      // EventEmitterメモリリーク防止
-      res.setMaxListeners(20); // 最大リスナー数を20に設定
-
-      // シンプルな監視開始
-      const requestId = Date.now(); // 簡単なリクエストID
-
-      // IPアドレス取得
-      const clientIP =
-        req.connection.remoteAddress || // IPアドレス
-        req.socket.remoteAddress || // IPアドレス
-        (req.connection.socket
-          ? req.connection.socket.remoteAddress // IPアドレス
-          : null) ||
-        req.headers["x-forwarded-for"]?.split(",")[0] || // IPアドレス
-        "unknown";
-
-      const urlPath = req.url.split("?")[0]; // クエリパラメータを削除
-      // v20 と同様に decodeURIComponent を使って表示用パスを作成
-      const displayPath = decodeURIComponent(urlPath); // URLデコード
-      const ext = path.extname(displayPath).toLowerCase(); // 拡張子を小文字化
-      let fullPath; // フルパス
-
-      // --- アイコンファイルエンドポイント: /icons を提供 ---
-      // 目的: favicon等のアイコンファイルを提供する
-      if (
-        req.method === "GET" && // GETメソッドの場合
-        urlPath.startsWith("/icons/") // "/icons/"から始まる場合
-      ) {
-        const publicDir = path.join(__dirname, "..", "public"); // パスを結合
-        const rel = urlPath.slice("/icons".length + 1); // "/icons/"を削除
-        const filePath = path.join(publicDir, "icons", rel); // パスを結合
-        try {
-          const ext = path.extname(filePath); // ファイル拡張子を取得
-          // テキストファイル（.js, .css, .html等）はUTF-8エンコーディングで読み込む
-          const isTextFile = [".js", ".css", ".html", ".htm", ".txt", ".json", ".svg", ".xml"].includes(ext.toLowerCase());
-          let data;
-          if (isTextFile) {
-            // テキストファイルはUTF-8で読み込んで、明示的にBufferに変換して送信
-            const text = await fs.promises.readFile(filePath, "utf8");
-            data = Buffer.from(text, "utf8");
-          } else {
-            // バイナリファイルはそのまま読み込む
-            data = await fs.promises.readFile(filePath);
-          }
-          const contentType = getContentType(ext); // コンテントタイプ
-          res.writeHead(200, { "Content-Type": contentType }); // コンテントタイプを設定
-          return res.end(data); // ファイルデータを送信
-        } catch (e) {
-          // ファイル読み込みエラーの場合
-          res.writeHead(404); // ステータスコードを404に設定
-          return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
-        }
-      }
-
-      // --- 設定UIエンドポイント: /setting を提供 ---
-      // 目的: config.txt の内容を閲覧・編集する簡易UIを提供する
-      try {
-        const SETTING_PREFIX = "/setting"; // 設定UIのプレフィックス
-        const cfgPath = path.join(__dirname, "..", "config.txt"); // 設定ファイルのパス
-
+        // 証明書が設定されていない場合はHTTPのまま
         if (
-          urlPath === "/setting" || // "setting"の場合
-          urlPath.startsWith(SETTING_PREFIX + "/") || // "setting/"から始まる場合
-          urlPath === SETTING_PREFIX // "setting"の場合
+          !certPath ||
+          !keyPath ||
+          certPath.trim() === "" ||
+          keyPath.trim() === ""
         ) {
-          const publicDir = path.join(__dirname, "..", "public"); // パスを結合
-          const cfgPath = path.join(__dirname, "..", "config.txt"); // パスを結合
+          return null;
+        }
 
-          // GET /setting/sysinfo -> システム情報を含むJSON（APIエンドポイントを先に処理）
-          if (
-            req.method === "GET" && // GETメソッドの場合
-            (urlPath === "/setting/sysinfo" || urlPath === "/setting/sysinfo/") // "setting/sysinfo"または"setting/sysinfo/"の場合
-          ) {
-            try {
-              const cpuCount = os.cpus().length;
-              const totalMemory = os.totalmem();
-              const totalMemoryGB = Math.round((totalMemory / (1024 * 1024 * 1024)) * 10) / 10;
-              const recommendedConcurrency = Math.max(4, Math.min(cpuCount, 32));
-              const recommendedMemory = Math.max(256, Math.min(Math.floor(totalMemoryGB * 1024 * 0.25), 8192));
-
-              const sysInfo = {
-                cpuCount,
-                totalMemoryGB,
-                recommendedConcurrency,
-                recommendedMemory,
-                maxConcurrency: 32, // 最大並列数の制限
-              };
-
-              res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-              return res.end(JSON.stringify(sysInfo));
-            } catch (e) {
-              logger.warn("[sysinfo error]", e);
-              res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-              return res.end(JSON.stringify({ error: "sysinfo_error" }));
-            }
+        try {
+          // 証明書ファイルの存在確認
+          if (!fs.existsSync(certPath)) {
+            logger.warn(`[SSL] 証明書ファイルが見つかりません: ${certPath}`);
+            return null;
+          }
+          if (!fs.existsSync(keyPath)) {
+            logger.warn(`[SSL] 秘密鍵ファイルが見つかりません: ${keyPath}`);
+            return null;
           }
 
-          // GET /setting/stats -> 統計情報
-          if (req.method === "GET" && (urlPath === "/setting/stats" || urlPath === "/setting/stats/")) {
-            try {
-              const snapshot = getStatsSnapshot();
-              res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-              return res.end(JSON.stringify(snapshot));
-            } catch (e) {
-              logger.warn("[stats endpoint error]", e);
-              res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-              return res.end(JSON.stringify({ error: "stats_error" }));
-            }
-          }
+          // 証明書と秘密鍵を読み込む
+          const cert = fs.readFileSync(certPath, "utf8");
+          const key = fs.readFileSync(keyPath, "utf8");
 
-          // public/settings.htmlからメインUIを提供
+          logger.info(`[SSL] 証明書を読み込みました: ${certPath}`);
+          return { cert, key };
+        } catch (e) {
+          logger.error(`[SSL] 証明書の読み込みに失敗しました: ${e.message}`);
+          return null;
+        }
+      };
+
+      const sslOptions = loadSSLOptions();
+      const useHTTPS = sslOptions !== null;
+
+      /**
+       * HTTP/HTTPSサーバーの作成
+       * 画像変換機能付きのHTTP/HTTPSサーバーを起動し、WebDAVリクエストと画像変換リクエストを処理
+       *
+       * 技術的詳細:
+       * - ハイブリッド処理: WebDAVと画像変換の両方を単一サーバーで処理
+       * - SSL/TLS対応: 証明書が設定されている場合はHTTPS、未設定の場合はHTTP
+       * - 拡張子判定: 画像ファイルの自動検出と変換処理の分岐
+       * - ストリーミング: 大容量ファイルの効率的な転送
+       * - エラーハンドリング: 各処理段階での適切なエラー応答
+       */
+      const httpServer = (useHTTPS ? https : http).createServer(
+        useHTTPS ? sslOptions : undefined,
+        async (req, res) => {
+          // EventEmitterメモリリーク防止
+          res.setMaxListeners(20); // 最大リスナー数を20に設定
+
+          // シンプルな監視開始
+          const requestId = Date.now(); // 簡単なリクエストID
+
+          // IPアドレス取得
+          const clientIP =
+            req.connection.remoteAddress || // IPアドレス
+            req.socket.remoteAddress || // IPアドレス
+            (req.connection.socket
+              ? req.connection.socket.remoteAddress // IPアドレス
+              : null) ||
+            req.headers["x-forwarded-for"]?.split(",")[0] || // IPアドレス
+            "unknown";
+
+          const urlPath = req.url.split("?")[0]; // クエリパラメータを削除
+          // v20 と同様に decodeURIComponent を使って表示用パスを作成
+          const displayPath = decodeURIComponent(urlPath); // URLデコード
+          const ext = path.extname(displayPath).toLowerCase(); // 拡張子を小文字化
+          let fullPath; // フルパス
+
+          // --- アイコンファイルエンドポイント: /icons を提供 ---
+          // 目的: favicon等のアイコンファイルを提供する
           if (
             req.method === "GET" && // GETメソッドの場合
-            (urlPath === "/setting" || urlPath === "/setting/") // "setting"または"setting/"の場合
+            urlPath.startsWith("/icons/") // "/icons/"から始まる場合
           ) {
-            const filePath = path.join(publicDir, "settings.html"); // パスを結合
-            try {
-              const data = await fs.promises.readFile(filePath, "utf8"); // ファイルデータを読み込む
-              res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); // コンテントタイプを設定
-              return res.end(data); // ファイルデータを送信
-            } catch (e) {
-              // ファイル読み込みエラーの場合
-              logger.warn("[setting UI serve error]", e); // エラーログ
-              res.writeHead(500); // ステータスコードを500に設定
-              return res.end("Unable to load settings UI"); // 設定UIを読み込めない場合はUnable to load settings UIを送信
-            }
-          }
-
-          // /setting/<path>下の静的ファイルを提供（APIパスを除く）
-          if (
-            req.method === "GET" && // GETメソッドの場合
-            urlPath.startsWith(SETTING_PREFIX + "/") && // "setting/"から始まる場合
-            !urlPath.startsWith(SETTING_PREFIX + "/data") && // "setting/data"から始まる場合
-            !urlPath.startsWith(SETTING_PREFIX + "/save") // "setting/save"から始まる場合
-          ) {
-            const rel = urlPath.slice(SETTING_PREFIX.length + 1); // "setting/"を削除
-            const filePath = path.join(publicDir, rel); // パスを結合
+            const publicDir = path.join(__dirname, "..", "public"); // パスを結合
+            const rel = urlPath.slice("/icons".length + 1); // "/icons/"を削除
+            const filePath = path.join(publicDir, "icons", rel); // パスを結合
             try {
               const ext = path.extname(filePath); // ファイル拡張子を取得
               // テキストファイル（.js, .css, .html等）はUTF-8エンコーディングで読み込む
-              const isTextFile = [".js", ".css", ".html", ".htm", ".txt", ".json", ".svg", ".xml"].includes(ext.toLowerCase());
+              const isTextFile = [
+                ".js",
+                ".css",
+                ".html",
+                ".htm",
+                ".txt",
+                ".json",
+                ".svg",
+                ".xml",
+              ].includes(ext.toLowerCase());
               let data;
               if (isTextFile) {
                 // テキストファイルはUTF-8で読み込んで、明示的にBufferに変換して送信
@@ -661,629 +598,996 @@ function startWebDAV(activeCacheDir) {
             }
           }
 
-          // GET /setting/data -> 設定内容を含むJSON
-          if (
-            req.method === "GET" && // GETメソッドの場合
-            (urlPath === "/setting/data" || urlPath === "/setting/data/") // "setting/data"または"setting/data/"の場合
-          ) {
-            try {
-              const txt = await fs.promises
-                .readFile(cfgPath, "utf8") // 設定ファイルを読み込む
-                .catch(() => ""); // 設定ファイルが存在しない場合は空文字列を返す
-              res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }); // コンテントタイプを設定
-              return res.end(JSON.stringify({ content: txt })); // 設定内容を送信
-            } catch (e) {
-              // 設定ファイル読み込みエラーの場合
-              logger.warn("[setting read error]", e); // エラーログ
-              res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" }); // コンテントタイプを設定
-              return res.end(JSON.stringify({ error: "read_error" })); // 設定内容を送信
-            }
-          }
+          // --- 設定UIエンドポイント: /setting を提供 ---
+          // 目的: config.txt の内容を閲覧・編集する簡易UIを提供する
+          try {
+            const SETTING_PREFIX = "/setting"; // 設定UIのプレフィックス
+            const cfgPath = path.join(__dirname, "..", "config.json"); // 設定ファイルのパス
 
-          // POST /setting/save -> 設定内容を書き込み（JSON { content: "..." }を期待）
-          if (
-            req.method === "POST" && // POSTメソッドの場合
-            (urlPath === "/setting/save" || urlPath === "/setting/save/") // "setting/save"または"setting/save/"の場合
-          ) {
-            let body = ""; // ボディ
-            req.on("data", (chunk) => {
-              // データを受信
-              body += chunk.toString(); // ボディを追加
-              // 制限: 大きすぎるボディは切断
-              if (body.length > 1e6) {
-                // ボディが1MBを超える場合
-                res.writeHead(413); // ステータスコードを413に設定
-                res.end("Payload too large"); // ペイロードが大きすぎる場合はPayload too largeを送信
-                req.connection.destroy(); // 接続を破棄
-              }
-            }); // データを受信
-            req.on("end", async () => {
-              // データを受信完了
-              try {
-                const obj = JSON.parse(body || "{}"); // ボディをJSONパース
-                if (typeof obj.content !== "string") {
-                  res.writeHead(400); // ステータスコードを400に設定
-                  return res.end("Bad request"); // リクエストが不正な場合はBad requestを送信
-                }
-                // 既存の設定を.backupディレクトリにバックアップ（ディレクトリの存在を確認）
-                // try {
-                //   const backupDir = path.join(__dirname, "..", ".backup");
-                //   // バックアップディレクトリが存在しない場合は作成（安全のため再帰的に）
-                //   await fs.promises
-                //     .mkdir(backupDir, { recursive: true })
-                //     .catch(() => {});
-                //   const bakPath = path.join(
-                //     backupDir,
-                //     "config.bak." + Date.now() + ".txt",
-                //   );
-                //   await fs.promises
-                //     .copyFile(cfgPath, bakPath)
-                //     .catch(() => {});
-                // } catch (e) {
-                //   // バックアップエラーは無視
-                // }
-                // 安全のため、必ず UTF-8 で書き込む
-                await fs.promises.writeFile(cfgPath, obj.content, "utf8"); // 設定ファイルを書き込む
-                logger.info("[設定保存] config.txt が更新されました"); // 設定保存ログ
-                res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" }); // コンテントタイプを設定
-                return res.end("OK"); // OKを送信
-              } catch (e) {
-                // 設定保存エラーの場合
-                logger.error("[setting save error]", e); // エラーログ
-                res.writeHead(500); // ステータスコードを500に設定
-                return res.end("Internal error"); // 内部エラーの場合はInternal errorを送信
-              }
-            });
-            return; // 設定保存完了
-          }
+            if (
+              urlPath === "/setting" || // "setting"の場合
+              urlPath.startsWith(SETTING_PREFIX + "/") || // "setting/"から始まる場合
+              urlPath === SETTING_PREFIX // "setting"の場合
+            ) {
+              const publicDir = path.join(__dirname, "..", "public"); // パスを結合
+              // const cfgPath = ... (不要なので削除)
 
-          // 未対応の /setting パスは 404
-          res.writeHead(404); // ステータスコードを404に設定
-          return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
-        }
-      } catch (e) {
-        logger.warn("[setting ui handler error]", e); // 設定UIハンドラーエラーログ
-        // 続行して通常の処理にフォールバック
-      }
-
-      try {
-        fullPath = safeResolve(ROOT_PATH, urlPath); // パスを解決
-      } catch (e) {
-        res.writeHead(403); // ステータスコードを403に設定
-        return res.end("Access denied"); // アクセスが拒否された場合はAccess deniedを送信
-      }
-
-      // PROPFINDリクエストの詳細ログ出力
-      if (req.method === "PROPFIND") {
-        let depth = req.headers["depth"]; // depthヘッダーを取得
-        if (Array.isArray(depth)) depth = depth[0]; // depthが配列の場合は最初の要素を取得
-        if (depth === undefined) depth = "(none)"; // depthが未定義の場合は"(none)"を設定
-        logger.info(`[PROPFIND] from=${req.connection.remoteAddress} path=${displayPath} depth=${depth}`); // PROPFINDログ
-      }
-
-      logger.info(`${req.connection.remoteAddress} ${req.method} ${displayPath}`); // リクエストログ
-
-      /**
-       * 画像ファイルのGETリクエスト処理（並列処理）
-       * 画像拡張子を持つファイルへのアクセス時に変換処理を直接実行
-       */
-      if (req.method === "GET" && IMAGE_EXTS.includes(ext)) {
-        logger.info(`[変換要求] ${fullPath}`); // 変換要求ログ
-
-        // 並列制限付きで直接変換処理を実行（スタック処理は使用しない）
-        (async () => {
-          const st = await statPWrap(fullPath).catch(() => null);
-
-          // ファイルが存在しない場合（ディレクトリやファイルでない場合）
-          if (!st || !st.isFile()) {
-            logger.warn(`[404 Not Found] ${fullPath}`); // 404 Not Foundログ
-            res.writeHead(404); // ステータスコードを404に設定
-            return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
-          }
-
-          const recordImageStats = (optimizedBytes, cacheHit = false) => {
-            if (!getImageConversionEnabled()) return;
-            if (!st || typeof st.size !== "number" || st.size <= 0) return;
-            const optimized = typeof optimizedBytes === "number" && optimizedBytes >= 0 ? optimizedBytes : st.size;
-            try {
-              recordImageTransfer({
-                originalBytes: st.size,
-                optimizedBytes: optimized,
-                cacheHit,
-              });
-            } catch (_) {}
-          };
-
-          // 画像変換機能が無効の場合は元画像をそのまま返す
-          if (!getImageConversionEnabled()) {
-            logger.info(`[画像変換無効] 元画像をそのまま返します: ${fullPath}`);
-            const fileExt = path.extname(fullPath).toLowerCase();
-            let contentType = "application/octet-stream";
-            if (fileExt === ".jpg" || fileExt === ".jpeg") contentType = "image/jpeg";
-            else if (fileExt === ".png") contentType = "image/png";
-            else if (fileExt === ".gif") contentType = "image/gif";
-            else if (fileExt === ".webp") contentType = "image/webp";
-            else if (fileExt === ".bmp") contentType = "image/bmp";
-            else if (fileExt === ".tiff" || fileExt === ".tif") contentType = "image/tiff";
-            else if (fileExt === ".avif") contentType = "image/avif";
-            else if (fileExt === ".heic" || fileExt === ".heif") contentType = "image/heic";
-
-            res.writeHead(200, {
-              "Content-Type": contentType,
-              "Content-Length": st.size,
-              "Last-Modified": new Date(st.mtimeMs).toUTCString(),
-              Connection: "Keep-Alive",
-              "Keep-Alive": "timeout=600",
-            });
-
-            const fileStream = fs.createReadStream(fullPath);
-            fileStream.pipe(res);
-            fileStream.on("error", (err) => {
-              logger.error(`[元画像送信失敗] ${displayPath}: ${err.message}`);
-              if (!res.headersSent) res.writeHead(500);
-              res.end("Failed to read original image");
-            });
-            fileStream.on("end", () => recordImageStats(st.size, false));
-            return;
-          }
-
-          // 画像サイズが1MB以上の場合のみキャッシュ
-          const shouldCache = st.size >= getCacheMinSize(); // キャッシュが必要かどうか
-
-          /**
-           * 品質パラメータの取得と検証
-           * クエリパラメータから品質を取得し、30-90の範囲に制限
-           * 設定ファイルから動的にデフォルト品質を取得
-           */
-          const qParam = req.url.match(/[?&]q=(\d+)/)?.[1]; // 品質パラメータを取得
-          const quality = qParam // 品質パラメータが存在する場合は品質パラメータを取得
-            ? Math.min(Math.max(parseInt(qParam, 10), 30), 90) // 品質パラメータを30-90の範囲に制限
-            : getDefaultQuality(); // デフォルト品質を取得して品質パラメータを設定
-
-          /**
-           * キャッシュキーの生成
-           * ファイルパス、リサイズサイズ、品質、変更時間、ファイルサイズを含めて
-           * ファイルの変更を検知し、適切なキャッシュ管理を実現
-           * SHA-256ハッシュを使用して固定長のキーを生成（Windowsパス長制限対策）
-           */
-          const keyData =
-            fullPath +
-            "|" +
-            (getPhotoSize() ?? "o") + // 写真サイズを取得
-            "|" +
-            quality + // 品質を取得
-            "|" +
-            String(st.mtimeMs) + // ファイルの変更時間を取得
-            "|" +
-            String(st.size); // ファイルサイズを取得
-
-          // SHA-256ハッシュを使用して64文字の固定長キーを生成
-          const key = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
-          const cachePath = activeCacheDir // キャッシュディレクトリが存在する場合はキャッシュパスを設定
-            ? path.join(activeCacheDir, key + ".webp") // キャッシュパスを設定
-            : null; // キャッシュディレクトリが存在しない場合はnullを設定
-
-          /**
-           * キャッシュファイルの存在確認とレスポンス
-           * 非同期でチェックしてブロッキングを避ける
-           */
-          if (shouldCache) {
-            try {
-              const cst = await statPWrap(cachePath).catch(() => null);
-              if (cst && cst.isFile && cst.isFile()) {
-                // キャッシュファイルが存在する場合、直接レスポンス
-                const headers = {
-                  "Content-Type": "image/webp", // コンテントタイプを設定
-                  "Content-Length": cst.size, // コンテント長を設定
-                  "Last-Modified": new Date(cst.mtimeMs).toUTCString(), // 最終更新時間を設定
-                  ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"', // ETagを設定
-                  Connection: "Keep-Alive", // 接続を保持
-                  "Keep-Alive": "timeout=600", // 接続タイムアウトを600秒に設定
-                }; // ヘッダーを設定
-                res.writeHead(200, headers); // ステータスコードを200に設定してヘッダーを送信
+              // GET /setting/sysinfo -> システム情報を含むJSON（APIエンドポイントを先に処理）
+              if (
+                req.method === "GET" && // GETメソッドの場合
+                (urlPath === "/setting/sysinfo" ||
+                  urlPath === "/setting/sysinfo/") // "setting/sysinfo"または"setting/sysinfo/"の場合
+              ) {
                 try {
-                  const s = fs.createReadStream(cachePath);
-                  let recorded = false;
-                  const recordOnce = () => {
-                    if (recorded) return;
-                    recorded = true;
-                    recordImageStats(cst.size, true);
+                  const cpuCount = os.cpus().length;
+                  const totalMemory = os.totalmem();
+                  const totalMemoryGB =
+                    Math.round((totalMemory / (1024 * 1024 * 1024)) * 10) / 10;
+                  const recommendedConcurrency = Math.max(
+                    4,
+                    Math.min(cpuCount, 32)
+                  );
+                  const recommendedMemory = Math.max(
+                    256,
+                    Math.min(Math.floor(totalMemoryGB * 1024 * 0.25), 8192)
+                  );
+
+                  const sysInfo = {
+                    cpuCount,
+                    totalMemoryGB,
+                    recommendedConcurrency,
+                    recommendedMemory,
+                    maxConcurrency: 32, // 最大並列数の制限
                   };
-                  const onErr = (e) => {
-                    logger.warn("[cache stream error]", e);
-                    try {
-                      if (!res.headersSent) res.writeHead(500);
-                    } catch (_) {}
-                    try {
-                      res.end("Internal error");
-                    } catch (_) {}
-                  };
-                  s.on("error", onErr);
-                  s.on("end", recordOnce);
-                  res.on("close", () => {
-                    try {
-                      s.destroy();
-                    } catch (_) {}
+
+                  res.writeHead(200, {
+                    "Content-Type": "application/json; charset=utf-8",
                   });
-                  return s.pipe(res);
+                  return res.end(JSON.stringify(sysInfo));
                 } catch (e) {
-                  logger.warn("[cache stream open error]", e);
-                  try {
-                    if (!res.headersSent) res.writeHead(500);
-                  } catch (_) {}
-                  return res.end("Internal error");
+                  logger.warn("[sysinfo error]", e);
+                  res.writeHead(500, {
+                    "Content-Type": "application/json; charset=utf-8",
+                  });
+                  return res.end(JSON.stringify({ error: "sysinfo_error" }));
                 }
               }
-            } catch (e) {
-              logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
-            }
-          }
 
-          // 画像変換を実行（並列制限付き）
-          try {
-            await convertAndRespondWithLimit({
-              fullPath, // ファイルパス
-              displayPath, // 表示パス
-              cachePath: shouldCache ? cachePath : null, // キャッシュパス
-              quality, // 品質
-              Photo_Size: getPhotoSize(), // 写真サイズ
-              res, // レスポンス
-              clientIP, // クライアントIP
-              originalSize: st.size,
-            }); // 画像変換を実行
-          } catch (e) {
-            logger.warn("[convert error]", e);
-            try {
-              res.writeHead(500);
-              res.end("Internal error");
-            } catch (_) {}
-          }
-        })().catch((e) => {
-          logger.warn("[async convert handler error]", e);
-          try {
-            if (!res.headersSent) {
-              res.writeHead(500);
-              res.end("Internal error");
-            }
-          } catch (_) {}
-        }); // 即座に非同期関数を実行
-
-        return; // 非同期処理なので即座にレスポンスを返さない
-      }
-
-      /**
-       * WebDAVリクエストの処理
-       * 画像以外のファイルやディレクトリに対するWebDAV操作を処理
-       */
-      try {
-        logger.info(`[WebDAV] ${req.method} ${displayPath}`); // WebDAVリクエストログ
-
-        // レスポンスオブジェクトの型チェック（WebDAVサーバーとの互換性確保）
-        if (typeof res.setHeader === "function") {
-          res.setHeader("Connection", "Keep-Alive"); // 接続を保持
-          res.setHeader("Keep-Alive", "timeout=120"); // 接続タイムアウトを120秒に設定
-          res.setHeader("Accept-Ranges", "bytes"); // バイト単位での範囲リクエストを許可
-          res.setHeader(
-            "Cache-Control", // キャッシュコントロールヘッダーを設定
-            "public, max-age=0, must-revalidate" // キャッシュを有効にして最大キャッシュ時間を0秒に設定し、必ず再検証を要求
-          ); // キャッシュコントロールヘッダーを設定
-        }
-
-        // WebDAVレスポンスの圧縮処理
-        if (getCompressionEnabled() && typeof res.setHeader === "function") {
-          // 圧縮が有効かどうか
-          const acceptEncoding = req.headers["accept-encoding"] || ""; // accept-encodingヘッダーを取得
-          const supportsGzip = acceptEncoding.includes("gzip"); // gzipがサポートされているかどうか
-
-          if (supportsGzip) {
-            // gzipがサポートされている場合
-            // レスポンスのラッパーを作成して圧縮処理を追加
-            const originalWriteHead = res.writeHead; // レスポンスのwriteHeadメソッド
-            const originalWrite = res.write; // レスポンスのwriteメソッド
-            const originalEnd = res.end; // レスポンスのendメソッド
-
-            let responseData = []; // レスポンスデータ
-            let headersWritten = false; // ヘッダーが書き込まれたかどうか
-
-            res.writeHead = function (statusCode, statusMessage, headers) {
-              // レスポンスのwriteHeadメソッド
-              if (typeof statusCode === "object") {
-                // ステータスコードがオブジェクトの場合
-                headers = statusCode; // ヘッダーをステータスコードに設定
-                statusCode = 200; // ステータスコードを200に設定
-              } // ステータスコードがオブジェクトの場合はヘッダーをステータスコードに設定
-              headers = headers || {}; // ヘッダーを空のオブジェクトに設定
-
-              // Content-Typeを確認（画像ファイルは除外）
-              const contentType =
-                headers["content-type"] || // content-typeヘッダーを取得
-                res.getHeader("content-type") || // content-typeヘッダーを取得
-                ""; // content-typeヘッダーが存在しない場合は空文字列を設定
-              const isTextResponse =
-                contentType.includes("xml") || // xmlが含まれているかどうか
-                contentType.includes("html") || // htmlが含まれているかどうか
-                contentType.includes("json") || // jsonが含まれているかどうか
-                contentType.includes("text"); // textが含まれているかどうか
-
-              // 画像ファイルは圧縮対象から除外
-              const isImageResponse =
-                contentType.includes("image/") || // image/が含まれているかどうか
-                contentType.includes("video/") || // video/が含まれているかどうか
-                contentType.includes("audio/") || // audio/が含まれているかどうか
-                contentType.includes("application/octet-stream"); // application/octet-streamが含まれているかどうか
-
-              if (isTextResponse && !isImageResponse) {
-                // テキストレスポンスで画像ファイル以外の場合
-                // テキストレスポンスで画像ファイル以外の場合は圧縮準備
-                headers["Vary"] = "Accept-Encoding"; // Varyヘッダーを設定
+              // GET /setting/stats -> 統計情報
+              if (
+                req.method === "GET" &&
+                (urlPath === "/setting/stats" || urlPath === "/setting/stats/")
+              ) {
+                try {
+                  const snapshot = getStatsSnapshot();
+                  res.writeHead(200, {
+                    "Content-Type": "application/json; charset=utf-8",
+                  });
+                  return res.end(JSON.stringify(snapshot));
+                } catch (e) {
+                  logger.warn("[stats endpoint error]", e);
+                  res.writeHead(500, {
+                    "Content-Type": "application/json; charset=utf-8",
+                  });
+                  return res.end(JSON.stringify({ error: "stats_error" }));
+                }
               }
 
-              headersWritten = true; // ヘッダーが書き込まれたことを設定
-              return originalWriteHead.call(
-                this, // レスポンスオブジェクト
-                statusCode, // ステータスコード
-                statusMessage, // ステータスメッセージ
-                headers // ヘッダー
-              ); // レスポンスのwriteHeadメソッド
-            };
+              // public/settings.htmlからメインUIを提供
+              if (
+                req.method === "GET" && // GETメソッドの場合
+                (urlPath === "/setting" || urlPath === "/setting/") // "setting"または"setting/"の場合
+              ) {
+                const filePath = path.join(publicDir, "settings.html"); // パスを結合
+                try {
+                  const data = await fs.promises.readFile(filePath, "utf8"); // ファイルデータを読み込む
+                  res.writeHead(200, {
+                    "Content-Type": "text/html; charset=utf-8",
+                  }); // コンテントタイプを設定
+                  return res.end(data); // ファイルデータを送信
+                } catch (e) {
+                  // ファイル読み込みエラーの場合
+                  logger.warn("[setting UI serve error]", e); // エラーログ
+                  res.writeHead(500); // ステータスコードを500に設定
+                  return res.end("Unable to load settings UI"); // 設定UIを読み込めない場合はUnable to load settings UIを送信
+                }
+              }
 
-            res.write = function (chunk, encoding) {
-              // レスポンスのwriteメソッド
-              if (chunk) {
-                // チャンクが存在する場合
-                responseData.push(
-                  // レスポンスデータにチャンクを追加
-                  Buffer.isBuffer(chunk) // チャンクがバッファの場合
-                    ? chunk // チャンクをそのまま追加
-                    : Buffer.from(chunk, encoding || "utf8") // チャンクを文字列に変換して追加
-                );
-              } // チャンクが存在する場合はレスポンスデータにチャンクを追加
-              return true; // 成功を返す
-            }; // レスポンスのwriteメソッド
-
-            res.end = function (chunk, encoding) {
-              // レスポンスのendメソッド
-              // 既にレスポンスが終了している場合は何もしない
-              if (res.headersSent && res.finished) {
-                // 既にレスポンスが終了している場合
-                return; // 何もしない
-              } // 既にレスポンスが終了している場合は何もしない
-
-              if (chunk) {
-                // チャンクが存在する場合
-                responseData.push(
-                  // レスポンスデータにチャンクを追加
-                  Buffer.isBuffer(chunk) // チャンクがバッファの場合
-                    ? chunk // チャンクをそのまま追加
-                    : Buffer.from(chunk, encoding || "utf8") // チャンクを文字列に変換して追加
-                );
-              } // チャンクが存在する場合はレスポンスデータにチャンクを追加
-
-              if (responseData.length === 0) {
-                // レスポンスデータが空の場合
-                return originalEnd.call(this); // レスポンスのendメソッドを呼び出す
-              } // レスポンスデータが空の場合はレスポンスのendメソッドを呼び出す
-
-              const fullData = Buffer.concat(responseData); // レスポンスデータをバッファに結合
-              const contentType = res.getHeader("content-type") || ""; // コンテントタイプを取得
-              const isTextResponse =
-                contentType.includes("xml") || // xmlが含まれているかどうか
-                contentType.includes("html") || // htmlが含まれているかどうか
-                contentType.includes("json") || // jsonが含まれているかどうか
-                contentType.includes("text"); // textが含まれているかどうか
-
-              // 画像ファイルは圧縮対象から除外
-              const isImageResponse =
-                contentType.includes("image/") || // image/が含まれているかどうか
-                contentType.includes("video/") || // video/が含まれているかどうか
-                contentType.includes("audio/") || // audio/が含まれているかどうか
-                contentType.includes("application/octet-stream"); // application/octet-streamが含まれているかどうか
-
-              // 最小サイズ制限（1KB未満は圧縮しない）
-              const MIN_COMPRESS_SIZE = 1024; // 最小サイズ制限（1KB未満は圧縮しない）
-              if (!isTextResponse || isImageResponse || fullData.length < MIN_COMPRESS_SIZE) {
-                // テキストレスポンスで画像ファイル以外の場合は圧縮スキップ
-                logger.info(`[圧縮スキップ] ${displayPath} - 条件未満: テキスト=${isTextResponse}, 画像=${isImageResponse}, サイズ=${fullData.length}`); // 圧縮スキップログ
-                return originalEnd.call(this, fullData); // レスポンスのendメソッドを呼び出す
-              } // テキストレスポンスで画像ファイル以外の場合は圧縮スキップ
-
-              // 圧縮処理
-              zlib.gzip(
-                fullData, // 圧縮対象データ
-                {
-                  level: 9, // 圧縮レベル
-                  memLevel: 9, // メモリレベル
-                  windowBits: 15, // ウィンドウビット
-                },
-                (err, compressed) => {
-                  // 圧縮処理
-                  if (res.headersSent && res.finished) return; // レスポンスが既に終了している場合は何もしない
-
-                  if (err) {
-                    // 圧縮エラーの場合
-                    logger.warn(`[圧縮エラー] ${displayPath}: ${err.message}`); // 圧縮エラーログ
-                    return originalEnd.call(this, fullData); // レスポンスのendメソッドを呼び出す
-                  } // 圧縮エラーの場合はレスポンスのendメソッドを呼び出す
-
-                  // 圧縮効果の確認
-                  const compressionRatio = compressed.length / fullData.length; // 圧縮率
-                  const threshold = getCompressionThreshold(); // 圧縮閾値
-                  logger.info(`[圧縮結果] ${displayPath} - 圧縮率: ${(compressionRatio * 100).toFixed(1)}%, 閾値: ${(threshold * 100).toFixed(1)}%`); // 圧縮結果ログ
-
-                  if (compressionRatio < threshold) {
-                    // 圧縮率が閾値未満の場合
-                    // 圧縮レスポンスの送信
-                    res.setHeader("Content-Encoding", "gzip"); // コンテントエンコーディングをgzipに設定
-                    res.setHeader("Content-Length", compressed.length); // コンテント長を設定
-                    logger.info(`[圧縮適用] ${displayPath} サイズ: ${fullData.length} → ${compressed.length} bytes (圧縮率: ${(compressionRatio * 100).toFixed(1)}%)`); // 圧縮適用ログ
-                    try {
-                      recordTextCompression({
-                        originalBytes: fullData.length,
-                        optimizedBytes: compressed.length,
-                      });
-                    } catch (_) {}
-                    originalEnd.call(this, compressed); // レスポンスのendメソッドを呼び出す
+              // /setting/<path>下の静的ファイルを提供（APIパスを除く）
+              if (
+                req.method === "GET" && // GETメソッドの場合
+                urlPath.startsWith(SETTING_PREFIX + "/") && // "setting/"から始まる場合
+                !urlPath.startsWith(SETTING_PREFIX + "/data") && // "setting/data"から始まる場合
+                !urlPath.startsWith(SETTING_PREFIX + "/save") // "setting/save"から始まる場合
+              ) {
+                const rel = urlPath.slice(SETTING_PREFIX.length + 1); // "setting/"を削除
+                const filePath = path.join(publicDir, rel); // パスを結合
+                try {
+                  const ext = path.extname(filePath); // ファイル拡張子を取得
+                  // テキストファイル（.js, .css, .html等）はUTF-8エンコーディングで読み込む
+                  const isTextFile = [
+                    ".js",
+                    ".css",
+                    ".html",
+                    ".htm",
+                    ".txt",
+                    ".json",
+                    ".svg",
+                    ".xml",
+                  ].includes(ext.toLowerCase());
+                  let data;
+                  if (isTextFile) {
+                    // テキストファイルはUTF-8で読み込んで、明示的にBufferに変換して送信
+                    const text = await fs.promises.readFile(filePath, "utf8");
+                    data = Buffer.from(text, "utf8");
                   } else {
-                    // 圧縮率が閾値以上の場合
-                    logger.info(`[圧縮スキップ] ${displayPath} - 圧縮効果が不十分: ${(compressionRatio * 100).toFixed(1)}% >= ${(threshold * 100).toFixed(1)}%`); // 圧縮スキップログ
-                    originalEnd.call(this, fullData); // レスポンスのendメソッドを呼び出す
-                  } // 圧縮率が閾値以上の場合はレスポンスのendメソッドを呼び出す
+                    // バイナリファイルはそのまま読み込む
+                    data = await fs.promises.readFile(filePath);
+                  }
+                  const contentType = getContentType(ext); // コンテントタイプ
+                  res.writeHead(200, { "Content-Type": contentType }); // コンテントタイプを設定
+                  return res.end(data); // ファイルデータを送信
+                } catch (e) {
+                  // ファイル読み込みエラーの場合
+                  res.writeHead(404); // ステータスコードを404に設定
+                  return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
                 }
-              );
-            }; // レスポンスのendメソッド
-          } // gzipがサポートされている場合は圧縮処理を実行
-        }
+              }
 
-        // テキストファイルの圧縮処理（WebDAV処理の前）
-        const textExts = [
-          ".html", // HTMLファイル
-          ".htm", // HTMLファイル
-          ".css", // CSSファイル
-          ".js", // JavaScriptファイル
-          ".json", // JSONファイル
-          ".xml", // XMLファイル
-          ".txt", // テキストファイル
-          ".md", // Markdownファイル
-        ];
-        const imageExts = [
-          ".jpg", // JPEG画像
-          ".jpeg", // JPEG画像
-          ".png", // PNG画像
-          ".gif", // GIF画像
-          ".webp", // WebP画像
-          ".bmp", // BMP画像
-          ".tiff", // TIFF画像
-          ".tif", // TIFF画像
-          ".avif", // AVIF画像
-          ".heic", // HEIC画像
-          ".heif", // HEIF画像
-          ".svg", // SVG画像
-        ];
-        const isTextFile = textExts.includes(ext.toLowerCase()); // テキストファイルかどうか
-        const isImageFile = imageExts.includes(ext.toLowerCase()); // 画像ファイルかどうか
+              // GET /setting/data -> 設定内容を含むJSON (config.jsonの中身)
+              if (
+                req.method === "GET" && // GETメソッドの場合
+                (urlPath === "/setting/data" || urlPath === "/setting/data/") // "setting/data"または"setting/data/"の場合
+              ) {
+                try {
+                  const jsonContent = await fs.promises
+                    .readFile(cfgPath, "utf8") // 設定ファイルを読み込む
+                    .catch(() => "{}"); // 設定ファイルが存在しない場合は空JSONを返す
 
-        if (
-          getCompressionEnabled() && // 圧縮機能が有効の場合
-          req.method === "GET" && // GETメソッドの場合
-          isTextFile && // テキストファイルの場合
-          !isImageFile && // 画像ファイルの場合
-          typeof res.setHeader === "function" // setHeaderメソッドが存在する場合
-        ) {
-          // 圧縮対応の確認
-          const acceptEncoding = req.headers["accept-encoding"] || ""; // accept-encodingヘッダーを取得
-          const supportsGzip = acceptEncoding.includes("gzip"); // gzipがサポートされているかどうか
+                  // 念のためパースして妥当性を確認
+                  try {
+                    JSON.parse(jsonContent);
+                  } catch (e) {
+                    // パースエラー時は空JSONとみなす
+                    res.writeHead(200, {
+                      "Content-Type": "application/json; charset=utf-8",
+                    });
+                    return res.end("{}");
+                  }
 
-          if (supportsGzip) {
-            try {
-              // 圧縮処理のtry-catch
-              // ファイルの存在確認
-              const fileStat = await statPWrap(fullPath).catch(() => null); // ファイルの存在確認
-              if (fileStat && fileStat.isFile() && fileStat.size > 1024) {
-                // ファイルが存在し、ファイルサイズが1KB以上の場合
-                // 1KB以上の場合のみ圧縮
-                // ファイル読み込みと圧縮（高性能環境向け非同期処理）
-                const fileData = await fs.promises.readFile(fullPath); // ファイルデータを読み込む
-                const compressed = await new Promise((resolve, reject) => {
-                  // 圧縮処理のPromise
+                  res.writeHead(200, {
+                    "Content-Type": "application/json; charset=utf-8",
+                  }); // コンテントタイプを設定
+                  return res.end(jsonContent); // 設定JSONをそのまま送信
+                } catch (e) {
+                  // 設定ファイル読み込みエラーの場合
+                  logger.warn("[setting read error]", e); // エラーログ
+                  res.writeHead(500, {
+                    "Content-Type": "application/json; charset=utf-8",
+                  }); // コンテントタイプを設定
+                  return res.end(JSON.stringify({ error: "read_error" })); // 設定内容を送信
+                }
+              }
+
+              // POST /setting/save -> 設定内容を書き込み（JSONデータそのものを期待）
+              if (
+                req.method === "POST" && // POSTメソッドの場合
+                (urlPath === "/setting/save" || urlPath === "/setting/save/") // "setting/save"または"setting/save/"の場合
+              ) {
+                let body = ""; // ボディ
+                req.on("data", (chunk) => {
+                  // データを受信
+                  body += chunk.toString(); // ボディを追加
+                  // 制限: 大きすぎるボディは切断
+                  if (body.length > 1e6) {
+                    // ボディが1MBを超える場合
+                    res.writeHead(413); // ステータスコードを413に設定
+                    res.end("Payload too large"); // ペイロードが大きすぎる場合はPayload too largeを送信
+                    req.connection.destroy(); // 接続を破棄
+                  }
+                }); // データを受信
+                req.on("end", async () => {
+                  // データを受信完了
+                  try {
+                    const obj = JSON.parse(body || "{}"); // ボディをJSONパース
+
+                    // バリデーション等は必要ならここで行う
+
+                    // 安全のため、必ず JSON 文字列形式で書き込む
+                    // アトミックな書き込み: 一時ファイルに書いてからリネーム
+                    const tmpCfgPath = cfgPath + ".tmp";
+                    await fs.promises.writeFile(
+                      tmpCfgPath,
+                      JSON.stringify(obj, null, 2),
+                      "utf8"
+                    );
+                    await fs.promises.rename(tmpCfgPath, cfgPath);
+                    logger.info("[設定保存] config.json が更新されました"); // 設定保存ログ
+                    res.writeHead(200, {
+                      "Content-Type": "text/plain; charset=utf-8",
+                    }); // コンテントタイプを設定
+                    return res.end("OK"); // OKを送信
+                  } catch (e) {
+                    // 設定保存エラーの場合
+                    logger.error("[setting save error]", e); // エラーログ
+                    res.writeHead(500); // ステータスコードを500に設定
+                    return res.end("Internal error"); // 内部エラーの場合はInternal errorを送信
+                  }
+                });
+                return; // 設定保存完了
+              }
+
+              // 未対応の /setting パスは 404
+              res.writeHead(404); // ステータスコードを404に設定
+              return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
+            }
+          } catch (e) {
+            logger.warn("[setting ui handler error]", e); // 設定UIハンドラーエラーログ
+            // 続行して通常の処理にフォールバック
+          }
+
+          try {
+            fullPath = safeResolve(ROOT_PATH, urlPath); // パスを解決
+          } catch (e) {
+            res.writeHead(403); // ステータスコードを403に設定
+            return res.end("Access denied"); // アクセスが拒否された場合はAccess deniedを送信
+          }
+
+          // PROPFINDリクエストの詳細ログ出力
+          if (req.method === "PROPFIND") {
+            let depth = req.headers["depth"]; // depthヘッダーを取得
+            if (Array.isArray(depth)) depth = depth[0]; // depthが配列の場合は最初の要素を取得
+            if (depth === undefined) depth = "(none)"; // depthが未定義の場合は"(none)"を設定
+            // logger.info(`[PROPFIND] from=${req.connection.remoteAddress} path=${displayPath} depth=${depth}`); // PROPFINDログ
+          }
+
+          // logger.info(`${req.connection.remoteAddress} ${req.method} ${displayPath}`); // リクエストログ
+
+          /**
+           * 画像ファイルのGETリクエスト処理（並列処理）
+           * 画像拡張子を持つファイルへのアクセス時に変換処理を直接実行
+           */
+          if (req.method === "GET" && IMAGE_EXTS.includes(ext)) {
+            // logger.info(`[変換要求] ${fullPath}`); // 変換要求ログ
+
+            // 並列制限付きで直接変換処理を実行（スタック処理は使用しない）
+            (async () => {
+              const st = await statPWrap(fullPath).catch(() => null);
+
+              // ファイルが存在しない場合（ディレクトリやファイルでない場合）
+              if (!st || !st.isFile()) {
+                logger.warn(`[404 Not Found] ${fullPath}`); // 404 Not Foundログ
+                res.writeHead(404); // ステータスコードを404に設定
+                return res.end("Not found"); // ファイルが見つからない場合はNot foundを送信
+              }
+
+              const recordImageStats = (optimizedBytes, cacheHit = false) => {
+                if (!getImageConversionEnabled()) return;
+                if (!st || typeof st.size !== "number" || st.size <= 0) return;
+                const optimized =
+                  typeof optimizedBytes === "number" && optimizedBytes >= 0
+                    ? optimizedBytes
+                    : st.size;
+                try {
+                  recordImageTransfer({
+                    originalBytes: st.size,
+                    optimizedBytes: optimized,
+                    cacheHit,
+                  });
+                } catch (_) {}
+              };
+
+              // 画像変換機能が無効の場合は元画像をそのまま返す
+              if (!getImageConversionEnabled()) {
+                logger.info(
+                  `[画像変換無効] 元画像をそのまま返します: ${fullPath}`
+                );
+                const fileExt = path.extname(fullPath).toLowerCase();
+                let contentType = "application/octet-stream";
+                if (fileExt === ".jpg" || fileExt === ".jpeg")
+                  contentType = "image/jpeg";
+                else if (fileExt === ".png") contentType = "image/png";
+                else if (fileExt === ".gif") contentType = "image/gif";
+                else if (fileExt === ".webp") contentType = "image/webp";
+                else if (fileExt === ".bmp") contentType = "image/bmp";
+                else if (fileExt === ".tiff" || fileExt === ".tif")
+                  contentType = "image/tiff";
+                else if (fileExt === ".avif") contentType = "image/avif";
+                else if (fileExt === ".heic" || fileExt === ".heif")
+                  contentType = "image/heic";
+
+                res.writeHead(200, {
+                  "Content-Type": contentType,
+                  "Content-Length": st.size,
+                  "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+                  Connection: "Keep-Alive",
+                  "Keep-Alive": "timeout=600",
+                });
+
+                const fileStream = fs.createReadStream(fullPath);
+                fileStream.pipe(res);
+                fileStream.on("error", (err) => {
+                  logger.error(
+                    `[元画像送信失敗] ${displayPath}: ${err.message}`
+                  );
+                  if (!res.headersSent) res.writeHead(500);
+                  res.end("Failed to read original image");
+                });
+                fileStream.on("end", () => {
+                  recordImageStats(st.size, false);
+                logger.info(
+                  `[通信量] ${displayPath} - 送信: ${(st.size / 1024).toFixed(1)} KB (元画像)`
+                );
+                });
+                return;
+              }
+
+              // 画像サイズが1MB以上の場合のみファイルキャッシュ（ディスク容量節約のため）
+              const shouldCache = st.size >= getCacheMinSize(); // ファイルキャッシュが必要かどうか
+
+              /**
+               * 品質パラメータの取得と検証
+               * クエリパラメータから品質を取得し、30-90の範囲に制限
+               * 設定ファイルから動的にデフォルト品質を取得
+               */
+              const qParam = req.url.match(/[?&]q=(\d+)/)?.[1]; // 品質パラメータを取得
+              const quality = qParam // 品質パラメータが存在する場合は品質パラメータを取得
+                ? Math.min(Math.max(parseInt(qParam, 10), 30), 90) // 品質パラメータを30-90の範囲に制限
+                : getDefaultQuality(); // デフォルト品質を取得して品質パラメータを設定
+
+              /**
+               * キャッシュキーの生成（メモリキャッシュとファイルキャッシュの両方で使用）
+               * ファイルパス、リサイズサイズ、品質、変更時間、ファイルサイズを含めて
+               * ファイルの変更を検知し、適切なキャッシュ管理を実現
+               * SHA-256ハッシュを使用して固定長のキーを生成（Windowsパス長制限対策）
+               */
+              const keyData =
+                fullPath +
+                "|" +
+                (getPhotoSize() ?? "o") + // 写真サイズを取得
+                "|" +
+                quality + // 品質を取得
+                "|" +
+                String(st.mtimeMs) + // ファイルの変更時間を取得
+                "|" +
+                String(st.size); // ファイルサイズを取得
+
+              // SHA-256ハッシュを使用して64文字の固定長キーを生成
+              const key = crypto
+                .createHash("sha256")
+                .update(keyData, "utf8")
+                .digest("hex");
+              const cachePath =
+                shouldCache && activeCacheDir // ファイルキャッシュが必要で、キャッシュディレクトリが存在する場合のみ
+                  ? path.join(activeCacheDir, key + ".webp") // キャッシュパスを設定
+                  : null; // キャッシュディレクトリが存在しない場合はnullを設定
+
+              // フォルダパスを抽出（メモリキャッシュ用）
+              const folderPath = path.dirname(fullPath);
+
+              // 現在のフォルダを設定（フォルダ変更検知）
+              const previousFolder = memoryCache.currentFolder;
+              // logger.info(`[フォルダ確認] previousFolder: "${previousFolder}", folderPath: "${folderPath}"`);
+              memoryCache.setCurrentFolder(folderPath);
+
+              // フォルダ変更時または最初のリクエスト時に事前変換をトリガー（バックグラウンドで実行）
+              if (previousFolder !== folderPath) {
+                const changeType =
+                  previousFolder === null ? "初回アクセス" : "フォルダ変更";
+                // logger.info(`[${changeType}検出] "${previousFolder}" → "${folderPath}" - 事前変換をトリガー`);
+                // 事前変換用の変換関数を作成
+                const convertForPreload = async (imageFullPath, cacheKey) => {
+                  try {
+                    const imageSt = await statPWrap(imageFullPath).catch(
+                      () => null
+                    );
+                    if (!imageSt || !imageSt.isFile()) return null;
+
+                    // キャッシュファイルパスを生成
+                    const imageCachePath = activeCacheDir
+                      ? path.join(activeCacheDir, cacheKey + ".webp")
+                      : null;
+
+                    // キャッシュファイルが既に存在する場合は読み込んで返す
+                    if (imageCachePath && fs.existsSync(imageCachePath)) {
+                      return await fs.promises
+                        .readFile(imageCachePath)
+                        .catch(() => null);
+                    }
+
+                    // 変換処理を実行（Sharpを使用）
+                    const imageMode = getImageMode();
+                    const isFast = imageMode === 1;
+                    const imageQuality = getDefaultQuality();
+                    const Photo_Size = getPhotoSize();
+
+                    let transformer = sharp(imageFullPath, {
+                      limitInputPixels: getSharpPixelLimit(),
+                    });
+                    if (!isFast) transformer = transformer.rotate();
+
+                    if (Photo_Size) {
+                      if (isFast) {
+                        transformer = transformer.resize({
+                          width: Photo_Size,
+                          withoutEnlargement: true,
+                        });
+                      } else {
+                        const meta = await transformer.metadata();
+                        if (meta.width != null && meta.height != null) {
+                          if (meta.width < meta.height) {
+                            transformer = transformer.resize({
+                              width: Photo_Size,
+                              withoutEnlargement: true,
+                            });
+                          } else {
+                            transformer = transformer.resize({
+                              height: Photo_Size,
+                              withoutEnlargement: true,
+                            });
+                          }
+                        }
+                      }
+                    }
+
+                    const effortVal = isFast
+                      ? getWebpEffortFast()
+                      : getWebpEffort();
+                    const presetVal = getWebpPreset();
+                    const reductionEffortVal = getWebpReductionEffort();
+
+                    transformer = transformer.webp({
+                      quality: imageQuality,
+                      effort: effortVal,
+                      preset: presetVal,
+                      nearLossless: false,
+                      smartSubsample: isFast ? false : true,
+                      reductionEffort: reductionEffortVal,
+                    });
+
+                    // Bufferに変換
+                    const buffer = await transformer
+                      .toBuffer()
+                      .catch(() => null);
+                    if (!buffer) return null;
+
+                    // キャッシュファイルに保存（オプション）
+                    if (imageCachePath) {
+                      try {
+                        const tmpPath =
+                          imageCachePath +
+                          `.tmp-${crypto.randomBytes(6).toString("hex")}`;
+                        await fs.promises.writeFile(tmpPath, buffer);
+                        await fs.promises
+                          .rename(tmpPath, imageCachePath)
+                          .catch(() => {
+                            fs.promises.unlink(tmpPath).catch(() => {});
+                          });
+                      } catch (_) {
+                        // キャッシュ保存エラーは無視
+                      }
+                    }
+
+                    return buffer;
+                  } catch (err) {
+                    // 変換エラーは無視
+                    return null;
+                  }
+                };
+
+                // キャッシュキー生成関数
+                const getCacheKeyForPreload = (imageFullPath, imageSt) => {
+                  const keyData =
+                    imageFullPath +
+                    "|" +
+                    (getPhotoSize() ?? "o") +
+                    "|" +
+                    getDefaultQuality() +
+                    "|" +
+                    String(imageSt.mtimeMs) +
+                    "|" +
+                    String(imageSt.size);
+                  return crypto
+                    .createHash("sha256")
+                    .update(keyData, "utf8")
+                    .digest("hex");
+                };
+
+                // 事前変換をトリガー（非同期で実行、エラーは無視）
+                preloadFolderImages(
+                  folderPath,
+                  convertForPreload,
+                  getCacheKeyForPreload
+                ).catch(() => {});
+              }
+
+              /**
+               * メモリキャッシュのチェック（最優先）
+               * メモリキャッシュに存在すれば直接レスポンスを返す
+               */
+              const memoryCachedData = memoryCache.get(folderPath, key);
+              if (memoryCachedData) {
+                // logger.info(`[メモリキャッシュヒット] ${displayPath}`);
+                const headers = {
+                  "Content-Type": "image/webp",
+                  "Content-Length": memoryCachedData.length,
+                  "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+                  ETag:
+                    '"' +
+                    memoryCachedData.length +
+                    "-" +
+                    Number(st.mtimeMs) +
+                    '"',
+                  Connection: "Keep-Alive",
+                  "Keep-Alive": "timeout=600",
+                };
+                res.writeHead(200, headers);
+                res.end(memoryCachedData);
+                recordImageStats(memoryCachedData.length, true);
+                logger.info(
+                  `[通信量] ${displayPath} - 送信: ${(memoryCachedData.length / 1024).toFixed(1)} KB (元: ${(st.size / 1024).toFixed(1)} KB, 圧縮率: ${((1 - memoryCachedData.length / st.size) * 100).toFixed(1)}%, メモリキャッシュ)`
+                );
+                return;
+              }
+
+              /**
+               * キャッシュファイルの存在確認とレスポンス
+               * 非同期でチェックしてブロッキングを避ける
+               */
+              if (shouldCache) {
+                try {
+                  const cst = await statPWrap(cachePath).catch(() => null);
+                  if (cst && cst.isFile && cst.isFile()) {
+                    // キャッシュファイルが存在する場合、直接レスポンス
+                    const headers = {
+                      "Content-Type": "image/webp", // コンテントタイプを設定
+                      "Content-Length": cst.size, // コンテント長を設定
+                      "Last-Modified": new Date(cst.mtimeMs).toUTCString(), // 最終更新時間を設定
+                      ETag: '"' + cst.size + "-" + Number(cst.mtimeMs) + '"', // ETagを設定
+                      Connection: "Keep-Alive", // 接続を保持
+                      "Keep-Alive": "timeout=600", // 接続タイムアウトを600秒に設定
+                    }; // ヘッダーを設定
+                    res.writeHead(200, headers); // ステータスコードを200に設定してヘッダーを送信
+                    try {
+                      const s = fs.createReadStream(cachePath);
+                      let recorded = false;
+                      const recordOnce = () => {
+                        if (recorded) return;
+                        recorded = true;
+                        recordImageStats(cst.size, true);
+                      };
+                      const onErr = (e) => {
+                        logger.warn("[cache stream error]", e);
+                        try {
+                          if (!res.headersSent) res.writeHead(500);
+                        } catch (_) {}
+                        try {
+                          res.end("Internal error");
+                        } catch (_) {}
+                      };
+                      s.on("error", onErr);
+                      s.on("end", () => {
+                        recordOnce();
+                        logger.info(
+                          `[通信量] ${displayPath} - 送信: ${(cst.size / 1024).toFixed(1)} KB (元: ${(st.size / 1024).toFixed(1)} KB, 圧縮率: ${((1 - cst.size / st.size) * 100).toFixed(1)}%, ファイルキャッシュ)`
+                        );
+                      });
+                      res.on("close", () => {
+                        try {
+                          s.destroy();
+                        } catch (_) {}
+                      });
+                      return s.pipe(res);
+                    } catch (e) {
+                      logger.warn("[cache stream open error]", e);
+                      try {
+                        if (!res.headersSent) res.writeHead(500);
+                      } catch (_) {}
+                      return res.end("Internal error");
+                    }
+                  }
+                } catch (e) {
+                  logger.warn("[cache read error async]", e); // キャッシュ読み込みエラーは警告ログを出力
+                }
+              }
+
+              // 画像変換を実行（並列制限付き）
+              try {
+                await convertAndRespondWithLimit({
+                  fullPath, // ファイルパス
+                  displayPath, // 表示パス
+                  cachePath: shouldCache ? cachePath : null, // キャッシュパス
+                  quality, // 品質
+                  Photo_Size: getPhotoSize(), // 写真サイズ
+                  res, // レスポンス
+                  clientIP, // クライアントIP
+                  originalSize: st.size,
+                }); // 画像変換を実行
+              } catch (e) {
+                logger.warn("[convert error]", e);
+                try {
+                  res.writeHead(500);
+                  res.end("Internal error");
+                } catch (_) {}
+              }
+            })().catch((e) => {
+              logger.warn("[async convert handler error]", e);
+              try {
+                if (!res.headersSent) {
+                  res.writeHead(500);
+                  res.end("Internal error");
+                }
+              } catch (_) {}
+            }); // 即座に非同期関数を実行
+
+            return; // 非同期処理なので即座にレスポンスを返さない
+          }
+
+          /**
+           * WebDAVリクエストの処理
+           * 画像以外のファイルやディレクトリに対するWebDAV操作を処理
+           */
+          try {
+            // logger.info(`[WebDAV] ${req.method} ${displayPath}`); // WebDAVリクエストログ
+
+            // レスポンスオブジェクトの型チェック（WebDAVサーバーとの互換性確保）
+            if (typeof res.setHeader === "function") {
+              res.setHeader("Connection", "Keep-Alive"); // 接続を保持
+              res.setHeader("Keep-Alive", "timeout=120"); // 接続タイムアウトを120秒に設定
+              res.setHeader("Accept-Ranges", "bytes"); // バイト単位での範囲リクエストを許可
+              res.setHeader(
+                "Cache-Control", // キャッシュコントロールヘッダーを設定
+                "public, max-age=0, must-revalidate" // キャッシュを有効にして最大キャッシュ時間を0秒に設定し、必ず再検証を要求
+              ); // キャッシュコントロールヘッダーを設定
+            }
+
+            // WebDAVレスポンスの圧縮処理
+            if (
+              getCompressionEnabled() &&
+              typeof res.setHeader === "function"
+            ) {
+              // 圧縮が有効かどうか
+              const acceptEncoding = req.headers["accept-encoding"] || ""; // accept-encodingヘッダーを取得
+              const supportsGzip = acceptEncoding.includes("gzip"); // gzipがサポートされているかどうか
+
+              if (supportsGzip) {
+                // gzipがサポートされている場合
+                // レスポンスのラッパーを作成して圧縮処理を追加
+                const originalWriteHead = res.writeHead; // レスポンスのwriteHeadメソッド
+                const originalWrite = res.write; // レスポンスのwriteメソッド
+                const originalEnd = res.end; // レスポンスのendメソッド
+
+                let responseData = []; // レスポンスデータ
+                let headersWritten = false; // ヘッダーが書き込まれたかどうか
+
+                res.writeHead = function (statusCode, statusMessage, headers) {
+                  // レスポンスのwriteHeadメソッド
+                  if (typeof statusCode === "object") {
+                    // ステータスコードがオブジェクトの場合
+                    headers = statusCode; // ヘッダーをステータスコードに設定
+                    statusCode = 200; // ステータスコードを200に設定
+                  } // ステータスコードがオブジェクトの場合はヘッダーをステータスコードに設定
+                  headers = headers || {}; // ヘッダーを空のオブジェクトに設定
+
+                  // Content-Typeを確認（画像ファイルは除外）
+                  const contentType =
+                    headers["content-type"] || // content-typeヘッダーを取得
+                    res.getHeader("content-type") || // content-typeヘッダーを取得
+                    ""; // content-typeヘッダーが存在しない場合は空文字列を設定
+                  const isTextResponse =
+                    contentType.includes("xml") || // xmlが含まれているかどうか
+                    contentType.includes("html") || // htmlが含まれているかどうか
+                    contentType.includes("json") || // jsonが含まれているかどうか
+                    contentType.includes("text"); // textが含まれているかどうか
+
+                  // 画像ファイルは圧縮対象から除外
+                  const isImageResponse =
+                    contentType.includes("image/") || // image/が含まれているかどうか
+                    contentType.includes("video/") || // video/が含まれているかどうか
+                    contentType.includes("audio/") || // audio/が含まれているかどうか
+                    contentType.includes("application/octet-stream"); // application/octet-streamが含まれているかどうか
+
+                  if (isTextResponse && !isImageResponse) {
+                    // テキストレスポンスで画像ファイル以外の場合
+                    // テキストレスポンスで画像ファイル以外の場合は圧縮準備
+                    headers["Vary"] = "Accept-Encoding"; // Varyヘッダーを設定
+                  }
+
+                  headersWritten = true; // ヘッダーが書き込まれたことを設定
+                  return originalWriteHead.call(
+                    this, // レスポンスオブジェクト
+                    statusCode, // ステータスコード
+                    statusMessage, // ステータスメッセージ
+                    headers // ヘッダー
+                  ); // レスポンスのwriteHeadメソッド
+                };
+
+                res.write = function (chunk, encoding) {
+                  // レスポンスのwriteメソッド
+                  if (chunk) {
+                    // チャンクが存在する場合
+                    responseData.push(
+                      // レスポンスデータにチャンクを追加
+                      Buffer.isBuffer(chunk) // チャンクがバッファの場合
+                        ? chunk // チャンクをそのまま追加
+                        : Buffer.from(chunk, encoding || "utf8") // チャンクを文字列に変換して追加
+                    );
+                  } // チャンクが存在する場合はレスポンスデータにチャンクを追加
+                  return true; // 成功を返す
+                }; // レスポンスのwriteメソッド
+
+                res.end = function (chunk, encoding) {
+                  // レスポンスのendメソッド
+                  // 既にレスポンスが終了している場合は何もしない
+                  if (res.headersSent && res.finished) {
+                    // 既にレスポンスが終了している場合
+                    return; // 何もしない
+                  } // 既にレスポンスが終了している場合は何もしない
+
+                  if (chunk) {
+                    // チャンクが存在する場合
+                    responseData.push(
+                      // レスポンスデータにチャンクを追加
+                      Buffer.isBuffer(chunk) // チャンクがバッファの場合
+                        ? chunk // チャンクをそのまま追加
+                        : Buffer.from(chunk, encoding || "utf8") // チャンクを文字列に変換して追加
+                    );
+                  } // チャンクが存在する場合はレスポンスデータにチャンクを追加
+
+                  if (responseData.length === 0) {
+                    // レスポンスデータが空の場合
+                    return originalEnd.call(this); // レスポンスのendメソッドを呼び出す
+                  } // レスポンスデータが空の場合はレスポンスのendメソッドを呼び出す
+
+                  const fullData = Buffer.concat(responseData); // レスポンスデータをバッファに結合
+                  const contentType = res.getHeader("content-type") || ""; // コンテントタイプを取得
+                  const isTextResponse =
+                    contentType.includes("xml") || // xmlが含まれているかどうか
+                    contentType.includes("html") || // htmlが含まれているかどうか
+                    contentType.includes("json") || // jsonが含まれているかどうか
+                    contentType.includes("text"); // textが含まれているかどうか
+
+                  // 画像ファイルは圧縮対象から除外
+                  const isImageResponse =
+                    contentType.includes("image/") || // image/が含まれているかどうか
+                    contentType.includes("video/") || // video/が含まれているかどうか
+                    contentType.includes("audio/") || // audio/が含まれているかどうか
+                    contentType.includes("application/octet-stream"); // application/octet-streamが含まれているかどうか
+
+                  // 最小サイズ制限（1KB未満は圧縮しない）
+                  const MIN_COMPRESS_SIZE = 1024; // 最小サイズ制限（1KB未満は圧縮しない）
+                  if (
+                    !isTextResponse ||
+                    isImageResponse ||
+                    fullData.length < MIN_COMPRESS_SIZE
+                  ) {
+                    // テキストレスポンスで画像ファイル以外の場合は圧縮スキップ
+                    // logger.info(`[圧縮スキップ] ${displayPath} - 条件未満: テキスト=${isTextResponse}, 画像=${isImageResponse}, サイズ=${fullData.length}`); // 圧縮スキップログ
+                    return originalEnd.call(this, fullData); // レスポンスのendメソッドを呼び出す
+                  } // テキストレスポンスで画像ファイル以外の場合は圧縮スキップ
+
+                  // 圧縮処理
                   zlib.gzip(
-                    fileData, // ファイルデータ
+                    fullData, // 圧縮対象データ
                     {
                       level: 9, // 圧縮レベル
                       memLevel: 9, // メモリレベル
                       windowBits: 15, // ウィンドウビット
-                    }, // 圧縮オプション
-                    (err, result) => {
-                      if (err) reject(err); // 圧縮エラーの場合はreject
-                      else resolve(result); // 圧縮後データの場合はresolve
-                    } // 圧縮エラー、圧縮後データ
-                  ); // 圧縮処理
-                }); // 圧縮処理のPromise
+                    },
+                    (err, compressed) => {
+                      // 圧縮処理
+                      if (res.headersSent && res.finished) return; // レスポンスが既に終了している場合は何もしない
 
-                // 圧縮効果の確認（環境変数で閾値を制御可能）
-                const compressionRatio = compressed.length / fileData.length; // 圧縮率
-                if (compressionRatio < getCompressionThreshold()) {
-                  // 圧縮レスポンスの送信
-                  res.writeHead(200, {
-                    "Content-Type": getContentType(ext), // コンテントタイプ
-                    "Content-Encoding": "gzip", // コンテントエンコーディング
-                    "Content-Length": compressed.length, // コンテント長
-                    Vary: "Accept-Encoding", // Varyヘッダー
-                  });
-                  res.end(compressed); // 圧縮後データを送信
-                  try {
-                    recordTextCompression({
-                      originalBytes: fileData.length,
-                      optimizedBytes: compressed.length,
-                    });
-                  } catch (_) {}
-                  logger.info(`[ファイル圧縮完了] ${displayPath} サイズ: ${fileData.length} → ${compressed.length} bytes (圧縮率: ${(compressionRatio * 100).toFixed(1)}%)`); // 圧縮完了ログ
-                  return; // 圧縮レスポンスを送信して処理終了
+                      if (err) {
+                        // 圧縮エラーの場合
+                        logger.warn(
+                          `[圧縮エラー] ${displayPath}: ${err.message}`
+                        ); // 圧縮エラーログ
+                        return originalEnd.call(this, fullData); // レスポンスのendメソッドを呼び出す
+                      } // 圧縮エラーの場合はレスポンスのendメソッドを呼び出す
+
+                      // 圧縮効果の確認
+                      const compressionRatio =
+                        compressed.length / fullData.length; // 圧縮率
+                      const threshold = getCompressionThreshold(); // 圧縮閾値
+                      // logger.info(`[圧縮結果] ${displayPath} - 圧縮率: ${(compressionRatio * 100).toFixed(1)}%, 閾値: ${(threshold * 100).toFixed(1)}%`); // 圧縮結果ログ
+
+                      if (compressionRatio < threshold) {
+                        // 圧縮率が閾値未満の場合
+                        // 圧縮レスポンスの送信
+                        res.setHeader("Content-Encoding", "gzip"); // コンテントエンコーディングをgzipに設定
+                        res.setHeader("Content-Length", compressed.length); // コンテント長を設定
+                        // logger.info(`[圧縮適用] ${displayPath} サイズ: ${fullData.length} → ${compressed.length} bytes (圧縮率: ${(compressionRatio * 100).toFixed(1)}%)`); // 圧縮適用ログ
+                        try {
+                          recordTextCompression({
+                            originalBytes: fullData.length,
+                            optimizedBytes: compressed.length,
+                          });
+                        } catch (_) {}
+                        logger.info(
+                          `[通信量] ${displayPath} - 送信: ${(compressed.length / 1024).toFixed(1)} KB (元: ${(fullData.length / 1024).toFixed(1)} KB, 圧縮率: ${((1 - compressed.length / fullData.length) * 100).toFixed(1)}%, gzip圧縮)`
+                        );
+                        originalEnd.call(this, compressed); // レスポンスのendメソッドを呼び出す
+                      } else {
+                        // 圧縮率が閾値以上の場合
+                        // logger.info(`[圧縮スキップ] ${displayPath} - 圧縮効果が不十分: ${(compressionRatio * 100).toFixed(1)}% >= ${(threshold * 100).toFixed(1)}%`); // 圧縮スキップログ
+                        originalEnd.call(this, fullData); // レスポンスのendメソッドを呼び出す
+                      } // 圧縮率が閾値以上の場合はレスポンスのendメソッドを呼び出す
+                    }
+                  );
+                }; // レスポンスのendメソッド
+              } // gzipがサポートされている場合は圧縮処理を実行
+            }
+
+            // テキストファイルの圧縮処理（WebDAV処理の前）
+            const textExts = [
+              ".html", // HTMLファイル
+              ".htm", // HTMLファイル
+              ".css", // CSSファイル
+              ".js", // JavaScriptファイル
+              ".json", // JSONファイル
+              ".xml", // XMLファイル
+              ".txt", // テキストファイル
+              ".md", // Markdownファイル
+            ];
+            const imageExts = [
+              ".jpg", // JPEG画像
+              ".jpeg", // JPEG画像
+              ".png", // PNG画像
+              ".gif", // GIF画像
+              ".webp", // WebP画像
+              ".bmp", // BMP画像
+              ".tiff", // TIFF画像
+              ".tif", // TIFF画像
+              ".avif", // AVIF画像
+              ".heic", // HEIC画像
+              ".heif", // HEIF画像
+              ".svg", // SVG画像
+            ];
+            const isTextFile = textExts.includes(ext.toLowerCase()); // テキストファイルかどうか
+            const isImageFile = imageExts.includes(ext.toLowerCase()); // 画像ファイルかどうか
+
+            if (
+              getCompressionEnabled() && // 圧縮機能が有効の場合
+              req.method === "GET" && // GETメソッドの場合
+              isTextFile && // テキストファイルの場合
+              !isImageFile && // 画像ファイルの場合
+              typeof res.setHeader === "function" // setHeaderメソッドが存在する場合
+            ) {
+              // 圧縮対応の確認
+              const acceptEncoding = req.headers["accept-encoding"] || ""; // accept-encodingヘッダーを取得
+              const supportsGzip = acceptEncoding.includes("gzip"); // gzipがサポートされているかどうか
+
+              if (supportsGzip) {
+                try {
+                  // 圧縮処理のtry-catch
+                  // ファイルの存在確認
+                  const fileStat = await statPWrap(fullPath).catch(() => null); // ファイルの存在確認
+                  if (fileStat && fileStat.isFile() && fileStat.size > 1024) {
+                    // ファイルが存在し、ファイルサイズが1KB以上の場合
+                    // 1KB以上の場合のみ圧縮
+                    // ファイル読み込みと圧縮（高性能環境向け非同期処理）
+                    const fileData = await fs.promises.readFile(fullPath); // ファイルデータを読み込む
+                    const compressed = await new Promise((resolve, reject) => {
+                      // 圧縮処理のPromise
+                      zlib.gzip(
+                        fileData, // ファイルデータ
+                        {
+                          level: 9, // 圧縮レベル
+                          memLevel: 9, // メモリレベル
+                          windowBits: 15, // ウィンドウビット
+                        }, // 圧縮オプション
+                        (err, result) => {
+                          if (err) reject(err); // 圧縮エラーの場合はreject
+                          else resolve(result); // 圧縮後データの場合はresolve
+                        } // 圧縮エラー、圧縮後データ
+                      ); // 圧縮処理
+                    }); // 圧縮処理のPromise
+
+                    // 圧縮効果の確認（環境変数で閾値を制御可能）
+                    const compressionRatio =
+                      compressed.length / fileData.length; // 圧縮率
+                    if (compressionRatio < getCompressionThreshold()) {
+                      // 圧縮レスポンスの送信
+                      res.writeHead(200, {
+                        "Content-Type": getContentType(ext), // コンテントタイプ
+                        "Content-Encoding": "gzip", // コンテントエンコーディング
+                        "Content-Length": compressed.length, // コンテント長
+                        Vary: "Accept-Encoding", // Varyヘッダー
+                      });
+                      res.end(compressed); // 圧縮後データを送信
+                      try {
+                        recordTextCompression({
+                          originalBytes: fileData.length,
+                          optimizedBytes: compressed.length,
+                        });
+                      } catch (_) {}
+                      logger.info(
+                        `[通信量] ${displayPath} - 送信: ${(compressed.length / 1024).toFixed(1)} KB (元: ${(fileData.length / 1024).toFixed(1)} KB, 圧縮率: ${((1 - compressed.length / fileData.length) * 100).toFixed(1)}%, ファイルgzip圧縮)`
+                      );
+                      return; // 圧縮レスポンスを送信して処理終了
+                    }
+                  }
+                } catch (compressError) {
+                  // 圧縮エラーの場合
+                  logger.warn(
+                    `[ファイル圧縮エラー] ${displayPath}: ${compressError.message}`
+                  ); // 圧縮エラーログ
                 }
               }
-            } catch (compressError) {
-              // 圧縮エラーの場合
-              logger.warn(`[ファイル圧縮エラー] ${displayPath}: ${compressError.message}`); // 圧縮エラーログ
             }
-          }
+
+            server.executeRequest(req, res); // リクエストを実行
+          } catch (e) {
+            logger.error("WebDAV error", e); // WebDAVエラーログ
+            if (!res.headersSent && typeof res.writeHead === "function") {
+              // ヘッダーが書き込まれていない場合
+              res.writeHead(500); // ステータスコードを500に設定
+              res.end("WebDAV error"); // WebDAVエラーメッセージを送信
+            } else if (typeof res.end === "function") {
+              // endメソッドが存在する場合
+              res.end(); // レスポンスを終了
+            }
+          } // エラーハンドリング
         }
+      );
 
-        server.executeRequest(req, res); // リクエストを実行
-      } catch (e) {
-        logger.error("WebDAV error", e); // WebDAVエラーログ
-        if (!res.headersSent && typeof res.writeHead === "function") {
-          // ヘッダーが書き込まれていない場合
-          res.writeHead(500); // ステータスコードを500に設定
-          res.end("WebDAV error"); // WebDAVエラーメッセージを送信
-        } else if (typeof res.end === "function") {
-          // endメソッドが存在する場合
-          res.end(); // レスポンスを終了
+      /**
+       * HTTPサーバーのタイムアウト設定
+       * 長時間の接続やリクエストによるリソース枯渇を防ぐ
+       *
+       * 技術的詳細:
+       * - ソケットタイムアウト: 非アクティブ接続の自動切断
+       * - Keep-Aliveタイムアウト: 接続再利用の最大時間
+       * - ヘッダータイムアウト: リクエストヘッダー受信の最大時間
+       * - リソース保護: メモリリークとファイルディスクリプタ枯渇の防止
+       */
+      httpServer.setTimeout(60000); // タイムアウト時間を60秒に設定
+      httpServer.keepAliveTimeout = 60000; // Keep-Aliveタイムアウト時間を60秒に設定
+      httpServer.headersTimeout = 65000; // ヘッダータイムアウト時間を65秒に設定
+
+      /**
+       * HTTP/HTTPSサーバーのエラーハンドリング
+       * EADDRINUSE等のエラーでクラッシュしないようにエラーイベントを先に登録
+       */
+      httpServer.on("error", (err) => {
+        if (err && err.code === "EADDRINUSE") {
+          // ポートが既に使用されている場合
+          logger.error(
+            `ポート ${PORT} は既に使用されています。サーバーの起動をスキップします。`
+          ); // ポートが既に使用されている場合のエラーログ
+        } else {
+          // エラーの場合
+          const serverType = useHTTPS ? "HTTPS" : "HTTP";
+          logger.error(`${serverType} server error`, err); // HTTP/HTTPSサーバーエラーログ
         }
-      } // エラーハンドリング
-    });
+      });
 
-    /**
-     * HTTPサーバーのタイムアウト設定
-     * 長時間の接続やリクエストによるリソース枯渇を防ぐ
-     *
-     * 技術的詳細:
-     * - ソケットタイムアウト: 非アクティブ接続の自動切断
-     * - Keep-Aliveタイムアウト: 接続再利用の最大時間
-     * - ヘッダータイムアウト: リクエストヘッダー受信の最大時間
-     * - リソース保護: メモリリークとファイルディスクリプタ枯渇の防止
-     */
-    httpServer.setTimeout(60000); // タイムアウト時間を60秒に設定
-    httpServer.keepAliveTimeout = 60000; // Keep-Aliveタイムアウト時間を60秒に設定
-    httpServer.headersTimeout = 65000; // ヘッダータイムアウト時間を65秒に設定
-
-    /**
-     * HTTP/HTTPSサーバーのエラーハンドリング
-     * EADDRINUSE等のエラーでクラッシュしないようにエラーイベントを先に登録
-     */
-    httpServer.on("error", (err) => {
-      if (err && err.code === "EADDRINUSE") {
-        // ポートが既に使用されている場合
-        logger.error(`ポート ${PORT} は既に使用されています。サーバーの起動をスキップします。`); // ポートが既に使用されている場合のエラーログ
-      } else {
-        // エラーの場合
-        const serverType = useHTTPS ? "HTTPS" : "HTTP";
-        logger.error(`${serverType} server error`, err); // HTTP/HTTPSサーバーエラーログ
-      }
-    });
-
-    /**
-     * HTTP/HTTPSサーバーの起動
-     * 指定されたポートでサーバーを起動し、起動完了をログ出力
-     */
-    httpServer.listen(PORT, () => {
-      const protocol = useHTTPS ? "https" : "http";
-      logger.info(`✅ WebDAV 起動: ${protocol}://localhost:${PORT}/`); // WebDAV起動ログ
-      if (useHTTPS) {
-        logger.info(`[SSL] HTTPSモードで起動しました`); // HTTPS起動ログ
-      }
-      logger.info(`[INFO] キャッシュDir=${activeCacheDir || "無効"} / MAX_LIST=${getMaxList()} / Photo_Size=${getPhotoSize() ?? "オリジナル"}`); // キャッシュディレクトリログ
-      logger.info(`[INFO] 圧縮機能=${getCompressionEnabled() ? "有効" : "無効"} / 圧縮閾値=${(getCompressionThreshold() * 100).toFixed(1)}%`); // 圧縮機能ログ
-    });
-  });
+      /**
+       * HTTP/HTTPSサーバーの起動
+       * 指定されたポートでサーバーを起動し、起動完了をログ出力
+       */
+      httpServer.listen(PORT, () => {
+        const protocol = useHTTPS ? "https" : "http";
+        logger.info(`✅ WebDAV 起動: ${protocol}://localhost:${PORT}/`); // WebDAV起動ログ
+        if (useHTTPS) {
+          logger.info(`[SSL] HTTPSモードで起動しました`); // HTTPS起動ログ
+        }
+        logger.info(
+          `[INFO] キャッシュDir=${
+            activeCacheDir || "無効"
+          } / MAX_LIST=${getMaxList()} / Photo_Size=${
+            getPhotoSize() ?? "オリジナル"
+          }`
+        ); // キャッシュディレクトリログ
+        logger.info(
+          `[INFO] 圧縮機能=${
+            getCompressionEnabled() ? "有効" : "無効"
+          } / 圧縮閾値=${(getCompressionThreshold() * 100).toFixed(1)}%`
+        ); // 圧縮機能ログ
+      });
+    }
+  );
 }
 
 module.exports = {

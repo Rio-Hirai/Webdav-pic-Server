@@ -511,24 +511,11 @@ function loadConfig() {
 // 初期設定読み込み
 loadConfig();
 
-// 設定ファイル監視開始
-// 注: Sharp設定の再適用はmain.jsの監視ループで実行
-let configWatchIntervalId = setInterval(() => {
-  loadConfig(); // 戻り値は使用しない（main.jsで処理）
-}, CONFIG_WATCH_INTERVAL);
-logger.info(
-  `[設定監視開始] ${CONFIG_FILE} を ${
-    CONFIG_WATCH_INTERVAL / 1000
-  }秒間隔で監視中`
-);
-
-// 設定監視停止（シャットダウン時に設定ファイル監視を停止する）
+// 設定監視停止関数（互換性のため残す）
+// 注: 設定ファイルの監視はmain.jsで実行されるため、このモジュールでは監視を開始しない
 function stopConfigMonitoring() {
-  if (configWatchIntervalId) {
-    // 設定監視が開始されている場合
-    clearInterval(configWatchIntervalId); // 監視を停止
-    configWatchIntervalId = null; // 監視IDをクリア
-  }
+  // 監視はmain.jsで管理されるため、ここでは何もしない
+  // 互換性のため関数は残す
 }
 
 // 圧縮機能の有効/無効制御（動的設定対応）

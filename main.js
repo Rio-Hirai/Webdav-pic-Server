@@ -216,9 +216,10 @@ if (RESTART_ENABLED) {
 
 /**
  * 設定変更監視
- * config.txtの変更を検出してSharp設定を再適用
- * config.js内のsetIntervalと統合するため、別途監視を開始
+ * config.jsonの変更を検出してSharp設定を再適用
+ * 10秒間隔で設定ファイルを監視し、変更を検出した場合に設定を反映
  */
+const CONFIG_WATCH_INTERVAL = 10000; // 10秒間隔で設定ファイルを監視
 setInterval(() => {
   const result = loadConfig();
   if (result.sharpConfigChanged) {
@@ -226,7 +227,10 @@ setInterval(() => {
     configureSharp();
     reinitializeConcurrency();
   }
-}, 10000); // config.jsと同じ10秒間隔でチェック
+}, CONFIG_WATCH_INTERVAL);
+logger.info(
+  `[設定監視開始] config.json を ${CONFIG_WATCH_INTERVAL / 1000}秒間隔で監視中`
+);
 
 /**
  * メインループ: 単一サーバーの起動

@@ -29,7 +29,7 @@
 
 依存関係と環境:
 - Node.js >= 25
-- `sharp` (0.34.4), `webdav-server`, `p-limit`, `lru-cache` など。HEIC 用の ImageMagick は別途必要
+- `sharp` (0.34.5), `webdav-server`, `p-limit`, `lru-cache` など。HEIC 用の ImageMagick は別途必要
 
 エージェント応答の言語ポリシー:
 - ユーザー向けの説明・コメント・要約は日本語で出力してください。

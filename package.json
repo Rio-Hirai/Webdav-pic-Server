@@ -38,19 +38,22 @@
   "license": "ISC",
   "description": "高性能WebDAV画像変換サーバー - 並列処理最適化、適応的スタック処理、動的設定管理",
   "dependencies": {
-    "express": "^5.1.0",
+    "express": "^5.2.1",
     "heic-convert": "^2.1.0",
-    "iconv-lite": "^0.7.0",
+    "iconv-lite": "^0.7.2",
     "iltorb": "^2.4.5",
-    "lru-cache": "^10.4.3",
-    "p-limit": "^2.3.0",
-    "pino": "^9.7.0",
-    "pino-pretty": "^13.1.1",
-    "sharp": "0.34.4",
+    "lru-cache": "^11.3.5",
+    "p-limit": "^7.3.0",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3",
+    "sharp": "0.34.5",
     "webdav-server": "^2.6.2"
   },
   "devDependencies": {
     "cross-env": "^10.1.0",
-    "jest": "^30.2.0"
+    "jest": "^30.3.0"
+  },
+  "deprecatedDependencies": {
+    "iltorb": "Deprecated: Node.js includes Brotli support via zlib; consider removing this package if it is no longer used."
   }
 }

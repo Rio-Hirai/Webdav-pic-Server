@@ -35,7 +35,7 @@ Testing checklist (manual):
 
 Dependencies and environment:
 - Needs Node.js >=25
-- `sharp` (0.34.4), `webdav-server`, `p-limit`, `lru-cache`; ImageMagick for HEIC
+- `sharp` (0.34.5), `webdav-server`, `p-limit`, `lru-cache`; ImageMagick for HEIC
 
 - **エージェントの応答言語（必須）**: ユーザー向けの説明・コメント・要約は日本語で出力してください。コマンド、ファイル名、コードのスニペットなどの技術的表記は英語のままでも構いません。
 - **Preferred language for chat replies**: Provide user-facing explanations, comments, and summaries in Japanese. It's acceptable to keep technical commands, filenames, and code snippets in English. (チャットの説明やユーザー向けのコメントは日本語で出力してください。コマンドやコードは英語のままで構いません。)

@@ -65,4 +65,53 @@ describe("WebDAV Server (WebDAVサーバー)", () => {
       }
     }).not.toThrow();
   });
+
+  test("ETagが一致する場合は304応答として処理すること", () => {
+    const req = {
+      headers: {
+        "if-none-match": '"cache-key-100"',
+      },
+    };
+    const res = {
+      writeHead: jest.fn(),
+      end: jest.fn(),
+    };
+    const headers = {
+      "Content-Type": "image/webp",
+      "Content-Length": 100,
+      ETag: '"cache-key-100"',
+      "Last-Modified": "Sat, 25 Apr 2026 00:00:00 GMT",
+    };
+
+    const result = webdav.__private.handleConditionalAndRange(
+      req,
+      res,
+      headers,
+      100
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(res.writeHead).toHaveBeenCalledWith(
+      304,
+      expect.not.objectContaining({
+        "Content-Length": expect.anything(),
+        "Content-Type": expect.anything(),
+      })
+    );
+    expect(res.end).toHaveBeenCalled();
+  });
+
+  test("Rangeヘッダーを解析して部分範囲を返すこと", () => {
+    expect(webdav.__private.parseRange("bytes=10-19", 100)).toEqual({
+      start: 10,
+      end: 19,
+    });
+    expect(webdav.__private.parseRange("bytes=-10", 100)).toEqual({
+      start: 90,
+      end: 99,
+    });
+    expect(webdav.__private.parseRange("bytes=100-120", 100)).toEqual({
+      invalid: true,
+    });
+  });
 });

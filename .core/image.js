@@ -17,7 +17,7 @@ const stream = require("stream");
 const { promisify } = require("util");
 const { spawn } = require("child_process");
 const sharp = require("sharp");
-const pLimit = require("p-limit");
+const pLimit = require("./p-limit-compat");
 const {
   logger, // ロガー
   MAGICK_CMD, // ImageMagickコマンド
@@ -28,7 +28,7 @@ const {
   getWebpEffortFast, // WebPの高速エンコード努力度
   getWebpPreset, // WebPのプリセット
   getWebpReductionEffort, // WebPの再圧縮努力度
-  getImageConversionEnabled, // 画像変換機能フラグ
+  getImageConversionEnabled = () => true, // 画像変換機能フラグ
 } = require("./config"); // 設定値を取得
 const { recordImageTransfer } = require("./stats"); // 転送統計
 

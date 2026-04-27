@@ -3,7 +3,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const pLimit = require("p-limit");
+const pLimit = require("./p-limit-compat");
 const { logger, getDynamicConfig } = require("./config");
 
 /**

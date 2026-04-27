@@ -20,12 +20,10 @@ describe("CachedFileSystemWrapper (ファイルシステムラッパー)", () =>
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     dirCache = new LRUCache({ max: 100, ttl: 1000 });
     statCache = new LRUCache({ max: 100, ttl: 1000 });
     getMaxList = jest.fn(() => 100);
-
-    wrapper = new CachedFileSystemWrapper(dirCache, statCache, getMaxList);
 
     // fsモックの設定
     fs.opendirSync = jest.fn(() => ({
@@ -55,6 +53,8 @@ describe("CachedFileSystemWrapper (ファイルシステムラッパー)", () =>
         size: 1024,
       })),
     };
+
+    wrapper = new CachedFileSystemWrapper(dirCache, statCache, getMaxList);
   });
 
   test("CachedFileSystemWrapperクラスが存在すること", () => {

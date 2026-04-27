@@ -62,7 +62,7 @@
 - **HTTP レスポンスのみ変換**: 画像変換は HTTP レスポンス送信時のみ実行。**元ファイルには一切影響を与えない**（読み取り専用で安全）
 - **リアルタイム変換・ストリーミング**: 変換後画像をディスクに保存せず、要求時にリアルタイムで変換してストリーミング送信。**ストレージ容量を節約**
 - **Sharp + ImageMagick ハイブリッド**: Sharp による高速変換を優先し、失敗時や HEIC 画像は ImageMagick に自動フォールバック
-- **改良した並列処理制御**: p-limit による改良した並列処理で、複数画像を同時に変換可能（設定値に応じて最大 32 並列）
+- **改良した並列処理制御**: CommonJS 互換のローカル limiter による並列処理で、複数画像を同時に変換可能（設定値に応じて最大 32 並列）
 - **システム情報自動検出**: CPU 数とメモリ情報から推奨並列数を自動算出
 - **動的設定管理**: サーバー再起動なしで設定を変更可能（`/setting` UI または `config.txt` 直接編集）
 - **動的並列数変更**: 設定変更時に並列制御を自動再初期化（再起動不要）
@@ -71,6 +71,9 @@
 **最新の主要機能**:
 
 - 🖼️ **HEIC/HEIF 形式対応**: ImageMagick への直接ルーティングで HEIC 画像をリアルタイム変換
+- ⚡ **v28 高速化**: 画像キャッシュの `304 Not Modified` と `Range` リクエストに対応し、再取得と部分取得の無駄な転送を削減
+- 🧰 **gzip 経路整理**: WebDAV テキストレスポンスの gzip 圧縮をラッパー側に一本化し、二重処理とヘッダー送信順の問題を解消
+- 🔧 **CommonJS 起動安定化**: ESM 専用 `p-limit` への直接依存をやめ、Node.js 25/Jest で起動できるローカル limiter に移行
 - ⚙️ **WebP 詳細設定**: preset、reduction effort、effort 設定による高精度圧縮制御
 - 📊 **通信量統計ダッシュボード**: 削減できたデータ量やキャッシュヒット率を自動集計し、Web UI と API で確認
 - 🎨 **設定画面大幅改善**: テンプレート機能、ダークモード対応、直感的な UI
@@ -153,7 +156,7 @@
 
 **実装箇所**:
 
-- **並列制御**: `.core/image.js` - `pLimit`による改良した並列処理制御（並列数制限、in-flight 管理）
+- **並列制御**: `.core/image.js` / `.core/p-limit-compat.js` - CommonJS 互換 limiter による並列処理制御（並列数制限、in-flight 管理）
 - **動的再初期化**: `.core/image.js` - `reinitializeConcurrency`関数で設定変更時の並列制御再初期化
 - **設定監視**: `main.js` - 設定変更検出と Sharp 設定の再適用
 - **システム情報**: `main.js` - CPU 数とメモリ情報の取得と推奨値算出
@@ -169,6 +172,8 @@
 - **ファイルアクセス制限**: ルートディレクトリ外へのアクセスを拒否
 - **並列処理制限**: 設定値に応じた適切な並列度制御
 - **HTTP 圧縮**: gzip 圧縮による通信量削減
+- **条件付きレスポンス**: 画像キャッシュの `ETag` / `Last-Modified` に基づく `304 Not Modified`
+- **Range 応答**: 変換済み WebP キャッシュと元画像レスポンスの `206 Partial Content`
 - **動的設定読み込み**: 設定ファイルの変更を自動反映
 - **設定値検証**: config.txt の入力規則チェックと自動修正
 
@@ -178,7 +183,8 @@
 - **Depth: infinity 拒否**: `.core/webdav.js` - WebDAV リクエスト前処理ミドルウェア（PROPFIND、Depth: infinity、セキュリティ対策、DoS 攻撃防止）
 - **並列処理制限**: `main.js` 93-133 行 - Sharp の動的並列度制御（メモリ枯渇と CPU 過負荷の防止）
 - **アクセス制限**: `.core/webdav.js` - プラットフォーム別のパス比較によるアクセス制御（Windows/Unix 系対応、大文字小文字区別）
-- **HTTP 圧縮**: `.core/webdav.js` - gzip 圧縮による WebDAV レスポンスとテキストファイルの圧縮（圧縮閾値設定、非同期処理）
+- **HTTP 圧縮**: `.core/webdav.js` - WebDAV テキストレスポンスの gzip 圧縮（圧縮閾値設定、ヘッダー確定前の一元処理）
+- **304/Range 応答**: `.core/webdav.js` - `If-None-Match` / `If-Modified-Since` / `Range` ヘッダー処理
 - **動的設定読み込み**: `.core/config.js` - `loadConfig`関数による設定ファイル監視と動的更新（差分検出、型変換、ログ出力）
 - **設定値検証**: `.core/config.js` - `validateConfigValue`関数による入力規則チェック（数値範囲、真偽値、時刻形式、パス形式の検証）
 
@@ -277,6 +283,10 @@ npm test
 | | **浮動小数点検証** | 浮動小数点設定（`COMPRESSION_THRESHOLD`等）が正しく解析されるか検証 |
 | `image.js` | **Sharp 変換** | Sharp ライブラリが正しく呼び出され、リサイズと WebP 変換が実行されることを検証（モック使用） |
 | | **ImageMagick フォールバック** | Sharp でのエラー発生時に、ImageMagick へのフォールバック処理がトリガーされることを検証 |
+| `webdav.js` | **条件付きリクエスト** | `If-None-Match` による `304 Not Modified` 判定を検証 |
+| | **Range 解析** | `bytes=10-19` や suffix range、不正 range の解析結果を検証 |
+| `p-limit-compat.js` | **並列数制御** | ローカル limiter が指定した同時実行数を超えないことを検証 |
+| `fs-wrapper.js` | **キャッシュ付き FS 操作** | 同期/非同期の readdir/stat がキャッシュとファイルシステムを正しく使い分けることを検証 |
 
 ### テスト環境について
 
@@ -628,6 +638,7 @@ MAGICK_PATH=magick
 
 ```javascript
 // 並列制御の初期化
+const pLimit = require("./p-limit-compat");
 let conversionLimit = pLimit(getMaxConcurrency());
 
 // 並列数を再初期化する関数（設定変更時に呼び出し）
@@ -767,7 +778,7 @@ RESTART_ENABLED=true RESTART_TIME=03:00 pm2 start main.js
 
 #### 並列処理最適化
 
-- **改良した並列実行**: p-limit による改良した並列処理で、複数画像を同時に変換
+- **改良した並列実行**: `.core/p-limit-compat.js` のローカル limiter による並列処理で、複数画像を同時に変換
 - **並列数制限**: 設定値に応じた同時実行数の制御（メモリ枯渇・CPU 過負荷防止）
 - **in-flight 管理**: 重複変換防止とタイムアウト管理による安定性向上
 - **動的並列制御**: config.txt の MAX_CONCURRENCY でリアルタイム調整可能（再起動不要）
@@ -800,9 +811,9 @@ RESTART_ENABLED=true RESTART_TIME=03:00 pm2 start main.js
 
 ### 並列処理制御
 
-**実装箇所**: `.core/image.js`、`main.js`
+**実装箇所**: `.core/image.js`、`.core/memory-cache.js`、`.core/p-limit-compat.js`
 
-- **p-limit**: 設定値による最大並列度制御（メモリ枯渇と CPU 過負荷の防止）
+- **ローカル limiter**: 設定値による最大並列度制御（メモリ枯渇と CPU 過負荷の防止）
 - **in-flight dedupe**: 重複変換要求の効率的な処理（同一キーの変換要求統合、タイムアウト制御）
 - **失敗バックオフ**: 変換失敗時の再試行制御（連続失敗時の再試行制御、リトライ制限）
 - **動的再初期化**: 設定変更時の並列制御自動再初期化（再起動不要）
@@ -918,7 +929,7 @@ du -sh Y:/caches/webdav/tmp
 **.core/image.js (1331 行)**:
 
 - 画像変換エンジン（Sharp/ImageMagick）
-- 並列処理制御（p-limit）
+- 並列処理制御（`.core/p-limit-compat.js`）
 - in-flight 重複防止
 - 動的並列制御再初期化
 - 原子的キャッシュ更新
@@ -930,6 +941,7 @@ du -sh Y:/caches/webdav/tmp
 - WebDAV サーバー実装（RFC4918 準拠）
 - セキュリティ対策
 - HTTP 圧縮機能
+- 304 Not Modified / Range リクエスト処理
 - キャッシュ機能付きファイルシステム
 - システム情報 API（`/setting/sysinfo`）
 
@@ -946,7 +958,9 @@ du -sh Y:/caches/webdav/tmp
 | `CachedFileSystem`             | .core/webdav.js | キャッシュ機能付き WebDAV ファイルシステム（LRU キャッシュ統合）                 |
 | `safeResolve()`                | .core/webdav.js | セキュアなパス解決（パストラバーサル対策、プラットフォーム対応）                 |
 | `convertAndRespond()`          | .core/image.js  | 画像変換・レスポンス送信（Sharp/ImageMagick、原子的更新）                        |
-| `convertAndRespondWithLimit()` | .core/image.js  | 並列制限付き画像変換（p-limit による改良した並列処理、in-flight 管理、重複防止） |
+| `convertAndRespondWithLimit()` | .core/image.js  | 並列制限付き画像変換（ローカル limiter による並列処理、in-flight 管理、重複防止） |
+| `parseRange()`                 | .core/webdav.js | `Range` ヘッダーを解析し、画像キャッシュの部分応答に利用                         |
+| `handleConditionalAndRange()`  | .core/webdav.js | `304 Not Modified` と `206 Partial Content` の共通判定                           |
 | `reinitializeConcurrency()`    | .core/image.js  | 並列制御の動的再初期化（設定変更時に自動実行）                                   |
 | `getSystemInfo()`              | main.js         | システム情報取得（CPU 数、メモリ情報、推奨値算出）                               |
 | `readdirSyncWrap()`            | .core/webdav.js | 同期ディレクトリ読み込みキャッシュ（ストリーミング読み込み、MAX_LIST 制限）      |
@@ -959,9 +973,10 @@ du -sh Y:/caches/webdav/tmp
 1. **初期化**: main.js → モジュール読み込み → .core/config.js 初期化 → .core/cache.js 初期化 → Sharp 最適化設定 → 設定変更監視開始
 2. **設定監視**: main.js → 10 秒間隔で設定ファイル監視 → 設定値検証 → 差分検出 → Sharp 設定・並列制御再初期化
 3. **リクエスト受信**: .core/webdav.js → HTTP サーバー → セキュアパス解決 → 画像拡張子判定
-4. **並列処理**: .core/webdav.js → 画像変換リクエスト → 非同期関数で直接実行 → p-limit による並列制御
-5. **画像変換**: .core/image.js → 並列制限チェック → in-flight 重複チェック → キャッシュキー生成 → キャッシュチェック → Sharp/ImageMagick 変換 → 原子的キャッシュ更新 → ストリーミングレスポンス
-6. **WebDAV 処理**: .core/webdav.js → ファイルシステム操作 → LRU キャッシュ活用 → セキュリティチェック → HTTP 圧縮 → レスポンス
+4. **並列処理**: .core/webdav.js → 画像変換リクエスト → 非同期関数で直接実行 → ローカル limiter による並列制御
+5. **画像キャッシュ応答**: .core/webdav.js → ETag/Last-Modified 判定 → 304 または Range 応答 → キャッシュ送信
+6. **画像変換**: .core/image.js → 並列制限チェック → in-flight 重複チェック → キャッシュキー生成 → キャッシュチェック → Sharp/ImageMagick 変換 → 原子的キャッシュ更新 → ストリーミングレスポンス
+7. **WebDAV 処理**: .core/webdav.js → ファイルシステム操作 → LRU キャッシュ活用 → セキュリティチェック → HTTP 圧縮 → レスポンス
 
 ## API リファレンス
 
@@ -980,6 +995,8 @@ du -sh Y:/caches/webdav/tmp
 | `Content-Encoding` | `gzip`（圧縮時）            |
 | `Last-Modified`    | 最終更新日時                |
 | `ETag`             | エンティティタグ            |
+| `Accept-Ranges`    | `bytes`（画像キャッシュ/元画像） |
+| `Content-Range`    | Range 応答時の送信範囲      |
 | `Cache-Control`    | キャッシュ制御              |
 | `Vary`             | `Accept-Encoding`（圧縮時） |
 
@@ -989,6 +1006,12 @@ ISC
 
 ## 更新履歴
 
+- **v28.0.0**: 高速化と Node.js 25/Jest 互換性の改善
+  - ⚡ **304 Not Modified**: 画像キャッシュと元画像レスポンスで `ETag` / `Last-Modified` による条件付き応答に対応し、再表示時の body 転送を削減
+  - 📦 **Range リクエスト対応**: メモリキャッシュ、ファイルキャッシュ、画像変換無効時の元画像レスポンスで `206 Partial Content` / `416 Range Not Satisfiable` を返却
+  - 🧰 **gzip 経路整理**: WebDAV テキストレスポンスの gzip 圧縮をラッパー側に一本化し、ファイル丸読み gzip 分岐とヘッダー送信後設定を解消
+  - 🔧 **ローカル limiter 化**: ESM 専用 `p-limit` への直接依存を廃止し、`.core/p-limit-compat.js` による CommonJS 互換の並列制御へ移行
+  - ✅ **テスト更新**: `fs-wrapper` のモック初期化順を修正し、304/Range helper と limiter のテストを追加
 - **v25.0.0**: 設定ファイルの JSON 化と事前変換機能の強化
   - 💾 **設定フォーマットの改善**: 独自形式の `config.txt` を廃止し、標準的な `config.json` に移行。設定画面の処理を最適化し、信頼性を向上
   - 📊 **メモリキャッシング＆事前変換**:

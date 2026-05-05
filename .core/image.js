@@ -644,15 +644,13 @@ async function convertAndRespond({
        * - エラー回復: 書き込み失敗時の適切なクリーンアップ
        * - ストリーミング: データ受信と同時のキャッシュ書き込み
        */
-      // メモリキャッシュ用のバッファ（すべての画像を対象）
-      const memoryCacheBuffer = [];
-      let memoryCacheBufferSize = 0;
-
       if (tmpPath) {
         const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルへの書き込みストリーム
         let wroteAny = false; // データ書き込みフラグ
 
         // データ受信時の処理
+        // ファイルキャッシュ（tmpPath）に書き出すのでメモリ側の重複バッファリングは行わない。
+        // 後段でリネーム成功後にディスクから読み戻してメモリキャッシュへ投入する。
         pass.on("data", (chunk) => {
           if (!wroteHeader) {
             // 最初のチャンク受信時にHTTPヘッダー送信（チャンク転送）
@@ -665,12 +663,6 @@ async function convertAndRespond({
           }
           wroteAny = true; // データが書き込まれたことを記録
           responseSize += chunk.length; // レスポンスサイズを累計
-
-          // メモリキャッシュ用バッファに蓄積（最大10MBまで）
-          if (memoryCacheBufferSize < 10 * 1024 * 1024) {
-            memoryCacheBuffer.push(chunk);
-            memoryCacheBufferSize += chunk.length;
-          }
         });
 
         // ストリーミング処理の設定（エラーハンドリング付き）
@@ -719,37 +711,30 @@ async function convertAndRespond({
             } catch (_) {}
           }
 
-          // メモリキャッシュに保存（ファイルキャッシュの有無に関係なく実行）
+          // メモリキャッシュに保存（ファイルキャッシュ成功時のみ、ディスクから読み戻し）
+          // MEMORY_CACHE_MAX_SIZE_MB <= 0 の場合はメモリキャッシュを無効化
           try {
-            const folderPath = path.dirname(fullPath);
-            // キャッシュキーを生成（webdav.jsと同じロジック）
-            const keyData =
-              fullPath +
-              "|" +
-              (Photo_Size ?? "o") +
-              "|" +
-              quality +
-              "|" +
-              String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
-              "|" +
-              String(originalSize);
-            const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
-
-            // メモリキャッシュ用データを取得
-            let cacheData = null;
-            if (cachePath && fs.existsSync(cachePath)) {
-              // ファイルキャッシュが存在する場合はそこから読み込む
-              cacheData = await fs.promises.readFile(cachePath).catch(() => null);
-            } else if (memoryCacheBuffer.length > 0 && memoryCacheBufferSize > 0) {
-              // ファイルキャッシュがない場合は、バッファに蓄積したデータを使用
-              cacheData = Buffer.concat(memoryCacheBuffer, memoryCacheBufferSize);
-            }
-
-            if (cacheData) {
-              memoryCache.set(folderPath, cacheKey, cacheData);
-              // logger.info(
-              //   `[メモリキャッシュ保存] ${path.basename(fullPath)} - サイズ: ${cacheData.length.toLocaleString()} bytes`
-              // );
+            const memCacheMaxMB = parseInt(
+              process.env.MEMORY_CACHE_MAX_SIZE_MB ?? "512",
+              10
+            );
+            if (memCacheMaxMB > 0 && cachePath && fs.existsSync(cachePath)) {
+              const folderPath = path.dirname(fullPath);
+              const keyData =
+                fullPath +
+                "|" +
+                (Photo_Size ?? "o") +
+                "|" +
+                quality +
+                "|" +
+                String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
+                "|" +
+                String(originalSize);
+              const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
+              const cacheData = await fs.promises.readFile(cachePath).catch(() => null);
+              if (cacheData) {
+                memoryCache.set(folderPath, cacheKey, cacheData);
+              }
             }
           } catch (memCacheErr) {
             // メモリキャッシュ保存エラーは無視（ログのみ）
@@ -771,8 +756,13 @@ async function convertAndRespond({
         /**
          * キャッシュなしの場合の処理
          * 直接レスポンスにストリーミング（メモリキャッシュ用バッファも蓄積）
+         * MEMORY_CACHE_MAX_SIZE_MB <= 0 の場合はバッファ蓄積も行わない
          */
-        // メモリキャッシュ用のバッファ（すべての画像を対象）
+        const memCacheMaxMB = parseInt(
+          process.env.MEMORY_CACHE_MAX_SIZE_MB ?? "512",
+          10
+        );
+        const memCacheEnabled = memCacheMaxMB > 0;
         const memoryCacheBufferNoCache = [];
         let memoryCacheBufferSizeNoCache = 0;
 
@@ -789,8 +779,8 @@ async function convertAndRespond({
           }
           responseSize += chunk.length; // レスポンスサイズを累計
 
-          // メモリキャッシュ用バッファに蓄積（最大10MBまで）
-          if (memoryCacheBufferSizeNoCache < 10 * 1024 * 1024) {
+          // メモリキャッシュが有効かつ蓄積上限以下の場合のみバッファに保持（最大10MB）
+          if (memCacheEnabled && memoryCacheBufferSizeNoCache < 10 * 1024 * 1024) {
             memoryCacheBufferNoCache.push(chunk);
             memoryCacheBufferSizeNoCache += chunk.length;
           }
@@ -812,28 +802,23 @@ async function convertAndRespond({
           clearTimeout(sharpTimeout);
 
           // メモリキャッシュに保存（ファイルキャッシュなしでも実行）
+          // MEMORY_CACHE_MAX_SIZE_MB <= 0 の場合は無効
           try {
-            const folderPath = path.dirname(fullPath);
-            // キャッシュキーを生成（webdav.jsと同じロジック）
-            const keyData =
-              fullPath +
-              "|" +
-              (Photo_Size ?? "o") +
-              "|" +
-              quality +
-              "|" +
-              String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
-              "|" +
-              String(originalSize);
-            const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
-
-            // バッファに蓄積したデータを使用
-            if (memoryCacheBufferNoCache.length > 0 && memoryCacheBufferSizeNoCache > 0) {
+            if (memCacheEnabled && memoryCacheBufferNoCache.length > 0 && memoryCacheBufferSizeNoCache > 0) {
+              const folderPath = path.dirname(fullPath);
+              const keyData =
+                fullPath +
+                "|" +
+                (Photo_Size ?? "o") +
+                "|" +
+                quality +
+                "|" +
+                String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
+                "|" +
+                String(originalSize);
+              const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
               const cacheData = Buffer.concat(memoryCacheBufferNoCache, memoryCacheBufferSizeNoCache);
               memoryCache.set(folderPath, cacheKey, cacheData);
-              // logger.info(
-              //   `[メモリキャッシュ保存] ${path.basename(fullPath)} - サイズ: ${cacheData.length.toLocaleString()} bytes`
-              // );
             }
           } catch (memCacheErr) {
             // メモリキャッシュ保存エラーは無視（ログのみ）

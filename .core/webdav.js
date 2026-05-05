@@ -514,6 +514,16 @@ function startWebDAV(activeCacheDir) {
        * - 大文字小文字: Windowsでは大文字小文字を区別しない比較
        * - 正規化: path.resolveによる絶対パス化と正規化
        */
+      // 2 つのパスが「同一ディレクトリ配下」かを判定（プラットフォーム別の大文字小文字対応）
+      const isInside = (childPath, rootPath) => {
+        if (process.platform === "win32") {
+          const lc = childPath.toLowerCase();
+          const rr = rootPath.toLowerCase();
+          return lc === rr || lc.startsWith(rr + path.sep);
+        }
+        return childPath === rootPath || childPath.startsWith(rootPath + path.sep);
+      };
+
       const safeResolve = (root, urlPath) => {
         const decoded = decodeURIComponent(urlPath || ""); // URLデコード
         // クエリパラメータを削除して先頭のスラッシュを削除
@@ -521,20 +531,31 @@ function startWebDAV(activeCacheDir) {
         const candidate = path.resolve(root, rel); // 相対パスを絶対パスに解決
         const rootResolved = path.resolve(root); // ルートパスを絶対パスに解決
 
-        // プラットフォームによって異なるパス比較（Windowsは大文字小文字を区別しない）
-        if (process.platform === "win32") {
-          const lc = candidate.toLowerCase(); // 小文字化
-          const rr = rootResolved.toLowerCase(); // 小文字化
-          if (!(lc === rr || lc.startsWith(rr + path.sep)))
-            throw new Error("Access denied"); // パスが一致しない場合はアクセス拒否
-        } else {
-          if (
-            !(
-              candidate === rootResolved ||
-              candidate.startsWith(rootResolved + path.sep)
-            )
-          )
-            throw new Error("Access denied"); // パスが一致しない場合はアクセス拒否
+        // 文字列ベースのパストラバーサル検査
+        if (!isInside(candidate, rootResolved)) {
+          throw new Error("Access denied");
+        }
+
+        // STRICT_ROOT_PATH=true の場合は realpath を解決してシンボリックリンク経由の脱出も拒否
+        // デフォルトは false（README で「シンボリックリンク完全対応」を謳っているため、互換性維持）
+        const strict =
+          String(process.env.STRICT_ROOT_PATH || "false").toLowerCase() === "true";
+        if (strict) {
+          try {
+            const realCandidate = fs.existsSync(candidate)
+              ? fs.realpathSync(candidate)
+              : candidate;
+            const realRoot = fs.realpathSync(rootResolved);
+            if (!isInside(realCandidate, realRoot)) {
+              logger.warn(
+                `[STRICT] symlink 越境を拒否: ${candidate} -> ${realCandidate}`
+              );
+              throw new Error("Access denied");
+            }
+          } catch (e) {
+            // realpath 失敗時（パス未存在 等）は文字列比較の結果を信用してそのまま返す
+            if (e && e.message === "Access denied") throw e;
+          }
         }
         return candidate; // 安全なパスを返す
       };

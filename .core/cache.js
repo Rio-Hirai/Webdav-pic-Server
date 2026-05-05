@@ -130,7 +130,8 @@ function initializeCacheSystem() {
     logger.info("=== キャッシュリセット完了 ===");
 
     // 定期クリーニングの開始（30分間隔で実行）
-    setInterval(() => cleanupCache(activeCacheDir), CLEANUP_INTERVAL_MS);
+    const cleanupInterval = setInterval(() => cleanupCache(activeCacheDir), CLEANUP_INTERVAL_MS);
+    if (typeof cleanupInterval.unref === "function") cleanupInterval.unref();
     logger.info(`[定期クリーニング設定] ${activeCacheDir} を ${CLEANUP_INTERVAL_MS/1000}秒間隔で監視中`);
   } else {
     logger.warn("=== キャッシュ機能が無効化されました ===");

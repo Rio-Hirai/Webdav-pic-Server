@@ -220,6 +220,16 @@ async function convertAndRespond({
       ? cachePath + `.tmp-${crypto.randomBytes(6).toString("hex")}`
       : null;
     let transformer; // Sharp変換パイプライン
+    let transformerDestroyed = false; // destroy() の二重呼び出しガード
+    const safeDestroyTransformer = () => {
+      if (transformerDestroyed) return;
+      transformerDestroyed = true;
+      try {
+        if (transformer && typeof transformer.destroy === "function") {
+          transformer.destroy();
+        }
+      } catch (_) {}
+    };
 
     try {
       /**
@@ -237,12 +247,7 @@ async function convertAndRespond({
       // クライアント切断時にパイプラインを破棄してリソースを解放
       try {
         if (res && typeof res.once === "function") {
-          res.once("close", () => {
-            try {
-              if (transformer && typeof transformer.destroy === "function")
-                transformer.destroy();
-            } catch (_) {}
-          });
+          res.once("close", () => safeDestroyTransformer());
         }
       } catch (_) {}
 
@@ -268,8 +273,16 @@ async function convertAndRespond({
           });
         } else {
           // バランス/高圧縮モード: 縦横を比較して短辺に合わせる（見た目優先）
-          const meta = await transformer.metadata(); // メタデータ取得
-          if (meta.width != null && meta.height != null) {
+          // metadata() は破損画像やストリーム失敗で reject するため try-catch で防御
+          let meta = null;
+          try {
+            meta = await transformer.metadata();
+          } catch (metaErr) {
+            logger.warn(
+              `[Sharp metadata取得失敗] ${displayPath}: ${metaErr && metaErr.message ? metaErr.message : metaErr} - 幅基準リサイズにフォールバック`
+            );
+          }
+          if (meta && meta.width != null && meta.height != null) {
             // サイズ情報が取得できた場合のみ
             if (meta.width < meta.height) {
               // 短辺が幅の場合
@@ -284,6 +297,12 @@ async function convertAndRespond({
                 withoutEnlargement: true, // 元画像より大きくしない
               });
             }
+          } else {
+            // メタデータが取れない場合は幅基準リサイズで継続
+            transformer = transformer.resize({
+              width: Photo_Size,
+              withoutEnlargement: true,
+            });
           }
         }
       }
@@ -316,7 +335,7 @@ async function convertAndRespond({
         logger.warn(
           `[Sharp変換タイムアウト] ${displayPath} - 5秒でタイムアウト`
         );
-        transformer.destroy();
+        safeDestroyTransformer();
         onErrorFallback(new Error("Sharp conversion timeout"));
       }, 5000);
 
@@ -1291,6 +1310,9 @@ function startInFlightMonitoring() {
       );
     }
   }, 10000); // 10秒間隔でチェック
+  if (typeof inFlightMonitorInterval.unref === "function") {
+    inFlightMonitorInterval.unref();
+  }
 }
 
 function stopInFlightMonitoring() {

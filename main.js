@@ -186,7 +186,8 @@ if (RESTART_ENABLED) {
   logger.info(`[再起動機能] 有効 - 再起動時刻: ${RESTART_TIME} (JST)`);
 
   // 毎分、再起動時刻をチェック
-  setInterval(() => {
+  // .unref() でイベントループ未処理のまま終了できるようにする（テスト/シャットダウン時のハンドル残留対策）
+  const restartInterval = setInterval(() => {
     const now = new Date();
     const jstTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     const currentTime = jstTime.toTimeString().slice(0, 5); // "HH:MM"形式
@@ -209,6 +210,7 @@ if (RESTART_ENABLED) {
       restartScheduled = false;
     }
   }, 60 * 1000); // 1分間隔でチェック
+  if (typeof restartInterval.unref === "function") restartInterval.unref();
 } else {
   logger.info("[再起動機能] 無効 (RESTART_ENABLED=false または未設定)");
 }
@@ -219,7 +221,7 @@ if (RESTART_ENABLED) {
  * 10秒間隔で設定ファイルを監視し、変更を検出した場合に設定を反映
  */
 const CONFIG_WATCH_INTERVAL = 10000; // 10秒間隔で設定ファイルを監視
-setInterval(() => {
+const configWatchInterval = setInterval(() => {
   const result = loadConfig();
   if (result.sharpConfigChanged) {
     logger.info("[設定変更検出] Sharp設定を再適用します");
@@ -227,6 +229,7 @@ setInterval(() => {
     reinitializeConcurrency();
   }
 }, CONFIG_WATCH_INTERVAL);
+if (typeof configWatchInterval.unref === "function") configWatchInterval.unref();
 logger.info(
   `[設定監視開始] config.json を ${CONFIG_WATCH_INTERVAL / 1000}秒間隔で監視中`
 );

@@ -1498,6 +1498,11 @@ function startWebDAV(activeCacheDir) {
                 "Cache-Control", // キャッシュコントロールヘッダーを設定
                 "public, max-age=0, must-revalidate" // キャッシュを有効にして最大キャッシュ時間を0秒に設定し、必ず再検証を要求
               ); // キャッシュコントロールヘッダーを設定
+              // 圧縮が有効な場合は Accept-Encoding によってレスポンスが変動しうるため、
+              // 中間キャッシュ層に通知する Vary ヘッダーを常に付与する（gzip 適用有無に関係なく）。
+              if (getCompressionEnabled()) {
+                res.setHeader("Vary", "Accept-Encoding");
+              }
             }
 
             // WebDAVレスポンスの圧縮処理

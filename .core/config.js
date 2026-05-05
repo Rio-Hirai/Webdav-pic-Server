@@ -110,9 +110,9 @@ function validateConfigValue(key, value, defaultValue) {
         }
         break;
       case "SHARP_MEMORY_LIMIT":
-        if (numValue < 16 || numValue > 4096) {
+        if (numValue < 16 || numValue > 16384) {
           logger.warn(
-            `[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (メモリ制限は16-4096MBの範囲)`
+            `[設定値無効] ${key}: "${value}" → デフォルト値 ${defaultValue} を使用 (メモリ制限は16-16384MBの範囲)`
           );
           return defaultValue;
         }
@@ -524,7 +524,9 @@ function getCompressionEnabled() {
 }
 
 function getCompressionThreshold() {
-  return parseFloat(process.env.COMPRESSION_THRESHOLD) || 0.3; // 環境変数が存在しない場合は0.3
+  const v = parseFloat(process.env.COMPRESSION_THRESHOLD);
+  // 0.0 を許容するため falsy チェックではなく isFinite で判定
+  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.3;
 }
 
 // 画像変換機能の有効/無効制御（動的設定対応）

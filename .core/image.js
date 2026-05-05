@@ -87,56 +87,72 @@ async function convertAndRespondWithLimit(params) {
   } = params; // パラメータを分解
 
   // キャッシュキー生成（重複変換検出用）
-  const cacheKey = `${fullPath}-${quality}-${Photo_Size}`;
+  // imageMode と mtimeMs を含めることで、モード変更直後やファイル差し替え後の
+  // 古い in-flight 変換に新しいリクエストが合流するのを防ぐ
+  const imageMode = getImageMode();
+  let mtimeMs = 0;
+  try {
+    mtimeMs = fs.statSync(fullPath).mtimeMs;
+  } catch (_) {
+    // statに失敗した場合はそのままconvertAndRespond側でエラー処理させる
+  }
+  const cacheKey = `${fullPath}|q=${quality}|s=${Photo_Size}|m=${imageMode}|t=${mtimeMs}`;
 
-  // in-flight重複チェック
-  if (inFlightConversions.has(cacheKey)) {
-    // logger.info(`[重複変換防止] 同じ画像の変換が進行中: ${displayPath}`);
+  // in-flight重複チェック: 既存の変換完了を Promise で待つ（busy poll を回避）
+  const existing = inFlightConversions.get(cacheKey);
+  if (existing && existing.promise) {
+    try {
+      await existing.promise; // 元の変換の完了/失敗を待つ
+    } catch (_) {
+      // 元の変換が失敗した場合でも自分側で改めて変換を試みる
+    }
 
-    // 既存の変換完了を待つ
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(async () => {
-        if (!inFlightConversions.has(cacheKey)) {
-          clearInterval(checkInterval);
-          try {
-            // キャッシュがある場合はキャッシュから返す
-            if (cachePath && fs.existsSync(cachePath)) {
-              const stream = fs.createReadStream(cachePath);
-              res.setHeader("Content-Type", "image/webp");
-              stream.pipe(res);
-              stream.on("end", resolve);
-              stream.on("error", () => resolve());
-              return;
-            }
-            // キャッシュが無い場合は改めて変換を実行（短時間で完了する想定）
-            await conversionLimit(() => convertAndRespond(params));
-          } catch (e) {
-            try {
-              res.writeHead(500);
-              res.end("Internal error");
-            } catch (_) {}
+    try {
+      // キャッシュがあればキャッシュから返す
+      if (cachePath && fs.existsSync(cachePath)) {
+        return await new Promise((resolve) => {
+          const stream = fs.createReadStream(cachePath);
+          if (!res.headersSent) {
+            res.setHeader("Content-Type", "image/webp");
           }
-          return resolve();
-        }
-      }, 100); // 100ms間隔でチェック
-    });
+          stream.on("error", () => {
+            try { if (!res.writableEnded) res.end(); } catch (_) {}
+            resolve();
+          });
+          stream.on("end", () => resolve());
+          stream.pipe(res);
+        });
+      }
+      // キャッシュが無ければ改めて変換を実行（並列制限経由）
+      return await conversionLimit(() => convertAndRespond(params));
+    } catch (e) {
+      try {
+        if (!res.headersSent) res.writeHead(500);
+        if (!res.writableEnded) res.end("Internal error");
+      } catch (_) {}
+    }
+    return;
   }
 
-  // in-flight管理に追加
-  inFlightConversions.set(cacheKey, { startTime: Date.now(), displayPath });
+  // in-flight管理に追加（変換 Promise を共有して busy poll を排除）
+  let resolveInFlight, rejectInFlight;
+  const promise = new Promise((resolve, reject) => {
+    resolveInFlight = resolve;
+    rejectInFlight = reject;
+  });
+  inFlightConversions.set(cacheKey, { startTime: Date.now(), displayPath, promise });
 
   try {
     // 並列制限を適用して変換実行
     const result = await conversionLimit(() => convertAndRespond(params));
-
-    // in-flight管理から削除
-    inFlightConversions.delete(cacheKey);
-
+    resolveInFlight(result);
     return result;
   } catch (error) {
-    // エラー時もin-flight管理から削除
-    inFlightConversions.delete(cacheKey);
+    rejectInFlight(error);
     throw error;
+  } finally {
+    // in-flight管理から削除（成功・失敗いずれの場合も）
+    inFlightConversions.delete(cacheKey);
   }
 }
 

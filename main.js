@@ -178,7 +178,7 @@ const activeCacheDir = initializeCacheSystem();
  * - ログ出力: 再起動予告と実行ログの記録
  */
 const RESTART_ENABLED = process.env.RESTART_ENABLED === "true";
-const RESTART_TIME = process.env.RESTART_TIME || "12:10"; // デフォルト: 午前3時
+const RESTART_TIME = process.env.RESTART_TIME || "03:00"; // デフォルト: 午前3時
 
 let restartScheduled = false; // 重複再起動防止フラグ
 
@@ -201,14 +201,14 @@ if (RESTART_ENABLED) {
 
         // グレースフルシャットダウン: 既存の接続が完了するまで待機
         process.exit(0); // 正常終了（PM2等のプロセス管理ツールが自動再起動）
-      }, 5 * 1000); // 5分 = 5 * 60 * 1000ms
+      }, 5 * 60 * 1000); // 5分 = 5 * 60 * 1000ms
     }
 
     // 再起動時刻を過ぎたらフラグをリセット（翌日の再起動準備）
     if (currentTime !== RESTART_TIME) {
       restartScheduled = false;
     }
-  }, 6 * 1000); // 1分間隔でチェック
+  }, 60 * 1000); // 1分間隔でチェック
 } else {
   logger.info("[再起動機能] 無効 (RESTART_ENABLED=false または未設定)");
 }

@@ -863,31 +863,99 @@ function startWebDAV(activeCacheDir) {
                 req.method === "POST" && // POSTメソッドの場合
                 (urlPath === "/setting/save" || urlPath === "/setting/save/") // "setting/save"または"setting/save/"の場合
               ) {
+                // CSRF 緩和: Origin / Referer が同一ホストでない場合は拒否
+                const hostHeader = String(req.headers["host"] || "");
+                const originHeader = req.headers["origin"];
+                const refererHeader = req.headers["referer"];
+                const isSameHost = (urlStr) => {
+                  if (!urlStr) return false;
+                  try {
+                    return new URL(urlStr).host === hostHeader;
+                  } catch (_) {
+                    return false;
+                  }
+                };
+                if (
+                  !(originHeader && isSameHost(originHeader)) &&
+                  !(refererHeader && isSameHost(refererHeader))
+                ) {
+                  logger.warn(
+                    `[setting save] Origin/Referer 不一致のため拒否 host=${hostHeader} origin=${originHeader || ""} referer=${refererHeader || ""}`
+                  );
+                  res.writeHead(403, {
+                    "Content-Type": "text/plain; charset=utf-8",
+                  });
+                  return res.end("Forbidden");
+                }
+
                 let body = ""; // ボディ
+                let aborted = false;
                 req.on("data", (chunk) => {
+                  if (aborted) return;
                   // データを受信
                   body += chunk.toString(); // ボディを追加
                   // 制限: 大きすぎるボディは切断
                   if (body.length > 1e6) {
                     // ボディが1MBを超える場合
+                    aborted = true;
                     res.writeHead(413); // ステータスコードを413に設定
                     res.end("Payload too large"); // ペイロードが大きすぎる場合はPayload too largeを送信
                     req.connection.destroy(); // 接続を破棄
                   }
                 }); // データを受信
                 req.on("end", async () => {
+                  if (aborted) return;
                   // データを受信完了
                   try {
                     const obj = JSON.parse(body || "{}"); // ボディをJSONパース
 
-                    // バリデーション等は必要ならここで行う
+                    // バリデーション: トップレベルが平坦なオブジェクトであること
+                    if (
+                      !obj ||
+                      typeof obj !== "object" ||
+                      Array.isArray(obj)
+                    ) {
+                      res.writeHead(400, {
+                        "Content-Type": "text/plain; charset=utf-8",
+                      });
+                      return res.end("Invalid payload");
+                    }
+
+                    // キー名と値の型を検証して安全な設定オブジェクトを構築
+                    const keyPattern = /^[A-Z][A-Z0-9_]{0,63}$/;
+                    const sanitized = {};
+                    for (const [k, v] of Object.entries(obj)) {
+                      if (!keyPattern.test(k)) {
+                        logger.warn(`[setting save] 無効なキーを無視: ${k}`);
+                        continue;
+                      }
+                      // 許容するのはプリミティブのみ（オブジェクト/配列は不可）
+                      if (
+                        typeof v === "string" ||
+                        typeof v === "number" ||
+                        typeof v === "boolean"
+                      ) {
+                        // 文字列値の長さ制限（パス系設定にも上限を設ける）
+                        if (typeof v === "string" && v.length > 1024) {
+                          logger.warn(
+                            `[setting save] ${k}: 文字列が長すぎるため無視 (${v.length}文字)`
+                          );
+                          continue;
+                        }
+                        sanitized[k] = v;
+                      } else {
+                        logger.warn(
+                          `[setting save] ${k}: 未対応の型 (${typeof v}) を無視`
+                        );
+                      }
+                    }
 
                     // 安全のため、必ず JSON 文字列形式で書き込む
                     // アトミックな書き込み: 一時ファイルに書いてからリネーム
                     const tmpCfgPath = cfgPath + ".tmp";
                     await fs.promises.writeFile(
                       tmpCfgPath,
-                      JSON.stringify(obj, null, 2),
+                      JSON.stringify(sanitized, null, 2),
                       "utf8"
                     );
                     await fs.promises.rename(tmpCfgPath, cfgPath);

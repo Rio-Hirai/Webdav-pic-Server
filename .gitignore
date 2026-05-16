@@ -16,3 +16,4 @@ ssl/
 *.key
 *.pem
 *.csr
+.claude/

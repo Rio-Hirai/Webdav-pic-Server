@@ -87,56 +87,72 @@ async function convertAndRespondWithLimit(params) {
   } = params; // パラメータを分解
 
   // キャッシュキー生成（重複変換検出用）
-  const cacheKey = `${fullPath}-${quality}-${Photo_Size}`;
+  // imageMode と mtimeMs を含めることで、モード変更直後やファイル差し替え後の
+  // 古い in-flight 変換に新しいリクエストが合流するのを防ぐ
+  const imageMode = getImageMode();
+  let mtimeMs = 0;
+  try {
+    mtimeMs = fs.statSync(fullPath).mtimeMs;
+  } catch (_) {
+    // statに失敗した場合はそのままconvertAndRespond側でエラー処理させる
+  }
+  const cacheKey = `${fullPath}|q=${quality}|s=${Photo_Size}|m=${imageMode}|t=${mtimeMs}`;
 
-  // in-flight重複チェック
-  if (inFlightConversions.has(cacheKey)) {
-    // logger.info(`[重複変換防止] 同じ画像の変換が進行中: ${displayPath}`);
+  // in-flight重複チェック: 既存の変換完了を Promise で待つ（busy poll を回避）
+  const existing = inFlightConversions.get(cacheKey);
+  if (existing && existing.promise) {
+    try {
+      await existing.promise; // 元の変換の完了/失敗を待つ
+    } catch (_) {
+      // 元の変換が失敗した場合でも自分側で改めて変換を試みる
+    }
 
-    // 既存の変換完了を待つ
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(async () => {
-        if (!inFlightConversions.has(cacheKey)) {
-          clearInterval(checkInterval);
-          try {
-            // キャッシュがある場合はキャッシュから返す
-            if (cachePath && fs.existsSync(cachePath)) {
-              const stream = fs.createReadStream(cachePath);
-              res.setHeader("Content-Type", "image/webp");
-              stream.pipe(res);
-              stream.on("end", resolve);
-              stream.on("error", () => resolve());
-              return;
-            }
-            // キャッシュが無い場合は改めて変換を実行（短時間で完了する想定）
-            await conversionLimit(() => convertAndRespond(params));
-          } catch (e) {
-            try {
-              res.writeHead(500);
-              res.end("Internal error");
-            } catch (_) {}
+    try {
+      // キャッシュがあればキャッシュから返す
+      if (cachePath && fs.existsSync(cachePath)) {
+        return await new Promise((resolve) => {
+          const stream = fs.createReadStream(cachePath);
+          if (!res.headersSent) {
+            res.setHeader("Content-Type", "image/webp");
           }
-          return resolve();
-        }
-      }, 100); // 100ms間隔でチェック
-    });
+          stream.on("error", () => {
+            try { if (!res.writableEnded) res.end(); } catch (_) {}
+            resolve();
+          });
+          stream.on("end", () => resolve());
+          stream.pipe(res);
+        });
+      }
+      // キャッシュが無ければ改めて変換を実行（並列制限経由）
+      return await conversionLimit(() => convertAndRespond(params));
+    } catch (e) {
+      try {
+        if (!res.headersSent) res.writeHead(500);
+        if (!res.writableEnded) res.end("Internal error");
+      } catch (_) {}
+    }
+    return;
   }
 
-  // in-flight管理に追加
-  inFlightConversions.set(cacheKey, { startTime: Date.now(), displayPath });
+  // in-flight管理に追加（変換 Promise を共有して busy poll を排除）
+  let resolveInFlight, rejectInFlight;
+  const promise = new Promise((resolve, reject) => {
+    resolveInFlight = resolve;
+    rejectInFlight = reject;
+  });
+  inFlightConversions.set(cacheKey, { startTime: Date.now(), displayPath, promise });
 
   try {
     // 並列制限を適用して変換実行
     const result = await conversionLimit(() => convertAndRespond(params));
-
-    // in-flight管理から削除
-    inFlightConversions.delete(cacheKey);
-
+    resolveInFlight(result);
     return result;
   } catch (error) {
-    // エラー時もin-flight管理から削除
-    inFlightConversions.delete(cacheKey);
+    rejectInFlight(error);
     throw error;
+  } finally {
+    // in-flight管理から削除（成功・失敗いずれの場合も）
+    inFlightConversions.delete(cacheKey);
   }
 }
 
@@ -204,6 +220,16 @@ async function convertAndRespond({
       ? cachePath + `.tmp-${crypto.randomBytes(6).toString("hex")}`
       : null;
     let transformer; // Sharp変換パイプライン
+    let transformerDestroyed = false; // destroy() の二重呼び出しガード
+    const safeDestroyTransformer = () => {
+      if (transformerDestroyed) return;
+      transformerDestroyed = true;
+      try {
+        if (transformer && typeof transformer.destroy === "function") {
+          transformer.destroy();
+        }
+      } catch (_) {}
+    };
 
     try {
       /**
@@ -221,12 +247,7 @@ async function convertAndRespond({
       // クライアント切断時にパイプラインを破棄してリソースを解放
       try {
         if (res && typeof res.once === "function") {
-          res.once("close", () => {
-            try {
-              if (transformer && typeof transformer.destroy === "function")
-                transformer.destroy();
-            } catch (_) {}
-          });
+          res.once("close", () => safeDestroyTransformer());
         }
       } catch (_) {}
 
@@ -252,8 +273,16 @@ async function convertAndRespond({
           });
         } else {
           // バランス/高圧縮モード: 縦横を比較して短辺に合わせる（見た目優先）
-          const meta = await transformer.metadata(); // メタデータ取得
-          if (meta.width != null && meta.height != null) {
+          // metadata() は破損画像やストリーム失敗で reject するため try-catch で防御
+          let meta = null;
+          try {
+            meta = await transformer.metadata();
+          } catch (metaErr) {
+            logger.warn(
+              `[Sharp metadata取得失敗] ${displayPath}: ${metaErr && metaErr.message ? metaErr.message : metaErr} - 幅基準リサイズにフォールバック`
+            );
+          }
+          if (meta && meta.width != null && meta.height != null) {
             // サイズ情報が取得できた場合のみ
             if (meta.width < meta.height) {
               // 短辺が幅の場合
@@ -268,6 +297,12 @@ async function convertAndRespond({
                 withoutEnlargement: true, // 元画像より大きくしない
               });
             }
+          } else {
+            // メタデータが取れない場合は幅基準リサイズで継続
+            transformer = transformer.resize({
+              width: Photo_Size,
+              withoutEnlargement: true,
+            });
           }
         }
       }
@@ -300,7 +335,7 @@ async function convertAndRespond({
         logger.warn(
           `[Sharp変換タイムアウト] ${displayPath} - 5秒でタイムアウト`
         );
-        transformer.destroy();
+        safeDestroyTransformer();
         onErrorFallback(new Error("Sharp conversion timeout"));
       }, 5000);
 
@@ -628,15 +663,13 @@ async function convertAndRespond({
        * - エラー回復: 書き込み失敗時の適切なクリーンアップ
        * - ストリーミング: データ受信と同時のキャッシュ書き込み
        */
-      // メモリキャッシュ用のバッファ（すべての画像を対象）
-      const memoryCacheBuffer = [];
-      let memoryCacheBufferSize = 0;
-
       if (tmpPath) {
         const writeStream = fs.createWriteStream(tmpPath); // 一時ファイルへの書き込みストリーム
         let wroteAny = false; // データ書き込みフラグ
 
         // データ受信時の処理
+        // ファイルキャッシュ（tmpPath）に書き出すのでメモリ側の重複バッファリングは行わない。
+        // 後段でリネーム成功後にディスクから読み戻してメモリキャッシュへ投入する。
         pass.on("data", (chunk) => {
           if (!wroteHeader) {
             // 最初のチャンク受信時にHTTPヘッダー送信（チャンク転送）
@@ -649,12 +682,6 @@ async function convertAndRespond({
           }
           wroteAny = true; // データが書き込まれたことを記録
           responseSize += chunk.length; // レスポンスサイズを累計
-
-          // メモリキャッシュ用バッファに蓄積（最大10MBまで）
-          if (memoryCacheBufferSize < 10 * 1024 * 1024) {
-            memoryCacheBuffer.push(chunk);
-            memoryCacheBufferSize += chunk.length;
-          }
         });
 
         // ストリーミング処理の設定（エラーハンドリング付き）
@@ -703,37 +730,30 @@ async function convertAndRespond({
             } catch (_) {}
           }
 
-          // メモリキャッシュに保存（ファイルキャッシュの有無に関係なく実行）
+          // メモリキャッシュに保存（ファイルキャッシュ成功時のみ、ディスクから読み戻し）
+          // MEMORY_CACHE_MAX_SIZE_MB <= 0 の場合はメモリキャッシュを無効化
           try {
-            const folderPath = path.dirname(fullPath);
-            // キャッシュキーを生成（webdav.jsと同じロジック）
-            const keyData =
-              fullPath +
-              "|" +
-              (Photo_Size ?? "o") +
-              "|" +
-              quality +
-              "|" +
-              String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
-              "|" +
-              String(originalSize);
-            const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
-
-            // メモリキャッシュ用データを取得
-            let cacheData = null;
-            if (cachePath && fs.existsSync(cachePath)) {
-              // ファイルキャッシュが存在する場合はそこから読み込む
-              cacheData = await fs.promises.readFile(cachePath).catch(() => null);
-            } else if (memoryCacheBuffer.length > 0 && memoryCacheBufferSize > 0) {
-              // ファイルキャッシュがない場合は、バッファに蓄積したデータを使用
-              cacheData = Buffer.concat(memoryCacheBuffer, memoryCacheBufferSize);
-            }
-
-            if (cacheData) {
-              memoryCache.set(folderPath, cacheKey, cacheData);
-              // logger.info(
-              //   `[メモリキャッシュ保存] ${path.basename(fullPath)} - サイズ: ${cacheData.length.toLocaleString()} bytes`
-              // );
+            const memCacheMaxMB = parseInt(
+              process.env.MEMORY_CACHE_MAX_SIZE_MB ?? "512",
+              10
+            );
+            if (memCacheMaxMB > 0 && cachePath && fs.existsSync(cachePath)) {
+              const folderPath = path.dirname(fullPath);
+              const keyData =
+                fullPath +
+                "|" +
+                (Photo_Size ?? "o") +
+                "|" +
+                quality +
+                "|" +
+                String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
+                "|" +
+                String(originalSize);
+              const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
+              const cacheData = await fs.promises.readFile(cachePath).catch(() => null);
+              if (cacheData) {
+                memoryCache.set(folderPath, cacheKey, cacheData);
+              }
             }
           } catch (memCacheErr) {
             // メモリキャッシュ保存エラーは無視（ログのみ）
@@ -755,8 +775,13 @@ async function convertAndRespond({
         /**
          * キャッシュなしの場合の処理
          * 直接レスポンスにストリーミング（メモリキャッシュ用バッファも蓄積）
+         * MEMORY_CACHE_MAX_SIZE_MB <= 0 の場合はバッファ蓄積も行わない
          */
-        // メモリキャッシュ用のバッファ（すべての画像を対象）
+        const memCacheMaxMB = parseInt(
+          process.env.MEMORY_CACHE_MAX_SIZE_MB ?? "512",
+          10
+        );
+        const memCacheEnabled = memCacheMaxMB > 0;
         const memoryCacheBufferNoCache = [];
         let memoryCacheBufferSizeNoCache = 0;
 
@@ -773,8 +798,8 @@ async function convertAndRespond({
           }
           responseSize += chunk.length; // レスポンスサイズを累計
 
-          // メモリキャッシュ用バッファに蓄積（最大10MBまで）
-          if (memoryCacheBufferSizeNoCache < 10 * 1024 * 1024) {
+          // メモリキャッシュが有効かつ蓄積上限以下の場合のみバッファに保持（最大10MB）
+          if (memCacheEnabled && memoryCacheBufferSizeNoCache < 10 * 1024 * 1024) {
             memoryCacheBufferNoCache.push(chunk);
             memoryCacheBufferSizeNoCache += chunk.length;
           }
@@ -796,28 +821,23 @@ async function convertAndRespond({
           clearTimeout(sharpTimeout);
 
           // メモリキャッシュに保存（ファイルキャッシュなしでも実行）
+          // MEMORY_CACHE_MAX_SIZE_MB <= 0 の場合は無効
           try {
-            const folderPath = path.dirname(fullPath);
-            // キャッシュキーを生成（webdav.jsと同じロジック）
-            const keyData =
-              fullPath +
-              "|" +
-              (Photo_Size ?? "o") +
-              "|" +
-              quality +
-              "|" +
-              String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
-              "|" +
-              String(originalSize);
-            const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
-
-            // バッファに蓄積したデータを使用
-            if (memoryCacheBufferNoCache.length > 0 && memoryCacheBufferSizeNoCache > 0) {
+            if (memCacheEnabled && memoryCacheBufferNoCache.length > 0 && memoryCacheBufferSizeNoCache > 0) {
+              const folderPath = path.dirname(fullPath);
+              const keyData =
+                fullPath +
+                "|" +
+                (Photo_Size ?? "o") +
+                "|" +
+                quality +
+                "|" +
+                String((await fs.promises.stat(fullPath).catch(() => ({ mtimeMs: 0, size: 0 }))).mtimeMs) +
+                "|" +
+                String(originalSize);
+              const cacheKey = crypto.createHash("sha256").update(keyData, "utf8").digest("hex");
               const cacheData = Buffer.concat(memoryCacheBufferNoCache, memoryCacheBufferSizeNoCache);
               memoryCache.set(folderPath, cacheKey, cacheData);
-              // logger.info(
-              //   `[メモリキャッシュ保存] ${path.basename(fullPath)} - サイズ: ${cacheData.length.toLocaleString()} bytes`
-              // );
             }
           } catch (memCacheErr) {
             // メモリキャッシュ保存エラーは無視（ログのみ）
@@ -1290,6 +1310,9 @@ function startInFlightMonitoring() {
       );
     }
   }, 10000); // 10秒間隔でチェック
+  if (typeof inFlightMonitorInterval.unref === "function") {
+    inFlightMonitorInterval.unref();
+  }
 }
 
 function stopInFlightMonitoring() {

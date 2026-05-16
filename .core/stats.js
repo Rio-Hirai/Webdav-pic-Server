@@ -172,6 +172,7 @@ function getCategoryBucket(name) {
 function schedulePersist() {
   if (pendingWriteTimer) return;
   pendingWriteTimer = setTimeout(persistToDisk, WRITE_DEBOUNCE_MS);
+  if (typeof pendingWriteTimer.unref === "function") pendingWriteTimer.unref();
 }
 
 /**

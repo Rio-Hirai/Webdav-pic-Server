@@ -1006,7 +1006,7 @@ ISC
 
 ## 更新履歴
 
-- **v28.0.0**: 高速化と Node.js 25/Jest 互換性の改善
+- **v26.0.0**: 高速化と Node.js 25/Jest 互換性の改善
   - ⚡ **304 Not Modified**: 画像キャッシュと元画像レスポンスで `ETag` / `Last-Modified` による条件付き応答に対応し、再表示時の body 転送を削減
   - 📦 **Range リクエスト対応**: メモリキャッシュ、ファイルキャッシュ、画像変換無効時の元画像レスポンスで `206 Partial Content` / `416 Range Not Satisfiable` を返却
   - 🧰 **gzip 経路整理**: WebDAV テキストレスポンスの gzip 圧縮をラッパー側に一本化し、ファイル丸読み gzip 分岐とヘッダー送信後設定を解消

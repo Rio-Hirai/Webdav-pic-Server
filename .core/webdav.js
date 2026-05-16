@@ -514,6 +514,16 @@ function startWebDAV(activeCacheDir) {
        * - 大文字小文字: Windowsでは大文字小文字を区別しない比較
        * - 正規化: path.resolveによる絶対パス化と正規化
        */
+      // 2 つのパスが「同一ディレクトリ配下」かを判定（プラットフォーム別の大文字小文字対応）
+      const isInside = (childPath, rootPath) => {
+        if (process.platform === "win32") {
+          const lc = childPath.toLowerCase();
+          const rr = rootPath.toLowerCase();
+          return lc === rr || lc.startsWith(rr + path.sep);
+        }
+        return childPath === rootPath || childPath.startsWith(rootPath + path.sep);
+      };
+
       const safeResolve = (root, urlPath) => {
         const decoded = decodeURIComponent(urlPath || ""); // URLデコード
         // クエリパラメータを削除して先頭のスラッシュを削除
@@ -521,20 +531,31 @@ function startWebDAV(activeCacheDir) {
         const candidate = path.resolve(root, rel); // 相対パスを絶対パスに解決
         const rootResolved = path.resolve(root); // ルートパスを絶対パスに解決
 
-        // プラットフォームによって異なるパス比較（Windowsは大文字小文字を区別しない）
-        if (process.platform === "win32") {
-          const lc = candidate.toLowerCase(); // 小文字化
-          const rr = rootResolved.toLowerCase(); // 小文字化
-          if (!(lc === rr || lc.startsWith(rr + path.sep)))
-            throw new Error("Access denied"); // パスが一致しない場合はアクセス拒否
-        } else {
-          if (
-            !(
-              candidate === rootResolved ||
-              candidate.startsWith(rootResolved + path.sep)
-            )
-          )
-            throw new Error("Access denied"); // パスが一致しない場合はアクセス拒否
+        // 文字列ベースのパストラバーサル検査
+        if (!isInside(candidate, rootResolved)) {
+          throw new Error("Access denied");
+        }
+
+        // STRICT_ROOT_PATH=true の場合は realpath を解決してシンボリックリンク経由の脱出も拒否
+        // デフォルトは false（README で「シンボリックリンク完全対応」を謳っているため、互換性維持）
+        const strict =
+          String(process.env.STRICT_ROOT_PATH || "false").toLowerCase() === "true";
+        if (strict) {
+          try {
+            const realCandidate = fs.existsSync(candidate)
+              ? fs.realpathSync(candidate)
+              : candidate;
+            const realRoot = fs.realpathSync(rootResolved);
+            if (!isInside(realCandidate, realRoot)) {
+              logger.warn(
+                `[STRICT] symlink 越境を拒否: ${candidate} -> ${realCandidate}`
+              );
+              throw new Error("Access denied");
+            }
+          } catch (e) {
+            // realpath 失敗時（パス未存在 等）は文字列比較の結果を信用してそのまま返す
+            if (e && e.message === "Access denied") throw e;
+          }
         }
         return candidate; // 安全なパスを返す
       };
@@ -863,31 +884,99 @@ function startWebDAV(activeCacheDir) {
                 req.method === "POST" && // POSTメソッドの場合
                 (urlPath === "/setting/save" || urlPath === "/setting/save/") // "setting/save"または"setting/save/"の場合
               ) {
+                // CSRF 緩和: Origin / Referer が同一ホストでない場合は拒否
+                const hostHeader = String(req.headers["host"] || "");
+                const originHeader = req.headers["origin"];
+                const refererHeader = req.headers["referer"];
+                const isSameHost = (urlStr) => {
+                  if (!urlStr) return false;
+                  try {
+                    return new URL(urlStr).host === hostHeader;
+                  } catch (_) {
+                    return false;
+                  }
+                };
+                if (
+                  !(originHeader && isSameHost(originHeader)) &&
+                  !(refererHeader && isSameHost(refererHeader))
+                ) {
+                  logger.warn(
+                    `[setting save] Origin/Referer 不一致のため拒否 host=${hostHeader} origin=${originHeader || ""} referer=${refererHeader || ""}`
+                  );
+                  res.writeHead(403, {
+                    "Content-Type": "text/plain; charset=utf-8",
+                  });
+                  return res.end("Forbidden");
+                }
+
                 let body = ""; // ボディ
+                let aborted = false;
                 req.on("data", (chunk) => {
+                  if (aborted) return;
                   // データを受信
                   body += chunk.toString(); // ボディを追加
                   // 制限: 大きすぎるボディは切断
                   if (body.length > 1e6) {
                     // ボディが1MBを超える場合
+                    aborted = true;
                     res.writeHead(413); // ステータスコードを413に設定
                     res.end("Payload too large"); // ペイロードが大きすぎる場合はPayload too largeを送信
                     req.connection.destroy(); // 接続を破棄
                   }
                 }); // データを受信
                 req.on("end", async () => {
+                  if (aborted) return;
                   // データを受信完了
                   try {
                     const obj = JSON.parse(body || "{}"); // ボディをJSONパース
 
-                    // バリデーション等は必要ならここで行う
+                    // バリデーション: トップレベルが平坦なオブジェクトであること
+                    if (
+                      !obj ||
+                      typeof obj !== "object" ||
+                      Array.isArray(obj)
+                    ) {
+                      res.writeHead(400, {
+                        "Content-Type": "text/plain; charset=utf-8",
+                      });
+                      return res.end("Invalid payload");
+                    }
+
+                    // キー名と値の型を検証して安全な設定オブジェクトを構築
+                    const keyPattern = /^[A-Z][A-Z0-9_]{0,63}$/;
+                    const sanitized = {};
+                    for (const [k, v] of Object.entries(obj)) {
+                      if (!keyPattern.test(k)) {
+                        logger.warn(`[setting save] 無効なキーを無視: ${k}`);
+                        continue;
+                      }
+                      // 許容するのはプリミティブのみ（オブジェクト/配列は不可）
+                      if (
+                        typeof v === "string" ||
+                        typeof v === "number" ||
+                        typeof v === "boolean"
+                      ) {
+                        // 文字列値の長さ制限（パス系設定にも上限を設ける）
+                        if (typeof v === "string" && v.length > 1024) {
+                          logger.warn(
+                            `[setting save] ${k}: 文字列が長すぎるため無視 (${v.length}文字)`
+                          );
+                          continue;
+                        }
+                        sanitized[k] = v;
+                      } else {
+                        logger.warn(
+                          `[setting save] ${k}: 未対応の型 (${typeof v}) を無視`
+                        );
+                      }
+                    }
 
                     // 安全のため、必ず JSON 文字列形式で書き込む
                     // アトミックな書き込み: 一時ファイルに書いてからリネーム
                     const tmpCfgPath = cfgPath + ".tmp";
                     await fs.promises.writeFile(
                       tmpCfgPath,
-                      JSON.stringify(obj, null, 2),
+                      JSON.stringify(sanitized, null, 2),
                       "utf8"
                     );
                     await fs.promises.rename(tmpCfgPath, cfgPath);
@@ -1409,6 +1498,11 @@ function startWebDAV(activeCacheDir) {
                 "Cache-Control", // キャッシュコントロールヘッダーを設定
                 "public, max-age=0, must-revalidate" // キャッシュを有効にして最大キャッシュ時間を0秒に設定し、必ず再検証を要求
               ); // キャッシュコントロールヘッダーを設定
+              // 圧縮が有効な場合は Accept-Encoding によってレスポンスが変動しうるため、
+              // 中間キャッシュ層に通知する Vary ヘッダーを常に付与する（gzip 適用有無に関係なく）。
+              if (getCompressionEnabled()) {
+                res.setHeader("Vary", "Accept-Encoding");
+              }
             }
 
             // WebDAVレスポンスの圧縮処理
